@@ -1,0 +1,42 @@
+{{- if .Values.columnar.enabled -}}
+{{- if semverCompare ">=1.21-0" $.Capabilities.KubeVersion.GitVersion }}
+apiVersion: batch/v1
+{{- else }}
+apiVersion: batch/v1beta1
+{{- end }}
+kind: CronJob
+metadata:
+  name: {{ include "manticore-streams.name" . }}-metrics-storage-cleaner
+  labels:
+    name: {{ include "manticore-streams.name" . }}-metrics-storage-cleaner
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  schedule: "*/30 * * * *"
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.columnar.cleaner.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.columnar.cleaner.activeDeadlineSeconds }}
+      template:
+        spec:
+          serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
+          containers:
+            - name: metrics-storage-cleaner
+              image: {{ .Values.columnar.image.repository }}:{{ .Values.columnar.image.tag | default .Chart.AppVersion }}
+              imagePullPolicy: {{ .Values.columnar.image.imagePullPolicy }}
+              env:
+                - name: EXTRA
+                  value: "1"
+                - name: RUN_IP
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: status.podIP
+                - name: CLEANER_DELAY_SEC
+                  value: {{ .Values.columnar.debug_cleaner_delay | quote }}
+              command:
+                  - /bin/sh
+                  - -c
+                  - '/usr/bin/mysql -h{{ include "manticore-streams.fullname" . }}-columnar-service.{{ .Release.Namespace }}.svc.cluster.local -P{{.Values.columnar.service.sqlPort}} -e "delete from metrics where scraptime < $(date -d "-{{ .Values.columnar.ttl }} days" +%s)"'
+              resources:
+                {{- toYaml .Values.columnar.cleaner.resources | nindent 16 }}
+          restartPolicy: OnFailure
+  {{- end }}

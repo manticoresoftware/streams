@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "manticore-streams.name" . }}-configmap
+  labels:
+    name: {{ include "manticore-streams.name" . }}-configmap
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+data:
+  process.json: |
+    {
+      "kafka": {
+        "inputHost": null,
+        "outputHost": null,
+        "inputTopic": null,
+        "outputTopic": null,
+        "groupName": null,
+        "fetch_min_bytes": {{ .Values.worker.kafkaFetchMinBytes | default 1 }},
+        "fetch_max_wait_ms": {{ .Values.worker.kafkaFetchMaxWaitMs | default 500 }},
+        "fetch_max_bytes": {{ .Values.worker.kafkaFetchMaxBytes | default 1048576 }},
+        "max_poll_records": {{ .Values.worker.kafkaMaxPollRecords | default 500 }}
+      },
+      "worker": {
+        "minThreads": 1,
+        "maxThreads": 3,
+        "maxBatchSize": 5000,
+        "maxManticoreQueryTimeout": {{ .Values.worker.maxManticoreQueryTimeout }},
+        "processedMeasureTime": {{ .Values.worker.processedMeasureTime }},
+        "maxKafkaMessage": {{ .Values.worker.maxKafkaMessage }},
+        "inactivityThreshold": {{ .Values.worker.inactivityThreshold }},
+        "loglevel": "{{ .Values.worker.loglevel }}",
+        "skipExceededMessages": {{ .Values.worker.skipExceededMessages }},
+        "image": {
+          "repository": "{{ .Values.worker.image.repository }}",
+          "tag": "{{ .Values.worker.image.tag | default .Chart.AppVersion}}",
+          "imagePullPolicy": "{{ .Values.worker.image.imagePullPolicy }}"
+        },
+        "outputDocs": 1000,
+        "jsltEnabled": null,
+        "jsltConf": null,
+        "transformRules": null,
+        "handlerRules": null,
+        "nodeSelector": {{- toJson .Values.worker.nodeSelector }},
+        "tolerations": {{- toJson .Values.worker.tolerations }},
+        "resources": {{- toJson .Values.worker.resources }},
+        "readinessProbe": {{- toJson .Values.worker.readinessProbe }},
+        "livenessProbe": {{- toJson .Values.worker.livenessProbe }},
+        "startupProbe": {{- if semverCompare "<=1.20-0" .Capabilities.KubeVersion.GitVersion }}
+          {{- toJson (set .Values.worker.startupProbe "enabled" false) }}
+        {{- else }}
+          {{- .Values.worker.startupProbe | toJson }}
+        {{- end }}
+      },
+      "manticore": {
+        "exposeOutside": false,
+        "exposePort": null,
+        "userId": 999,
+        "image": {
+          "repository": "{{ .Values.manticore.image.repository }}",
+          "tag": "{{ .Values.manticore.image.tag | default .Chart.AppVersion}}",
+          "imagePullPolicy": "{{ .Values.manticore.image.imagePullPolicy }}"
+        },
+        "searchd": {
+          "blacklist-mode": 0
+        },
+        "service": {
+          "sqlPort": {{ .Values.manticore.service.sqlPort }},
+          "httpPort": {{ .Values.manticore.service.httpPort | default 9308 }}
+        },
+        "volumeClaimTemplates": {
+          "size": "{{ .Values.manticore.volumeSize }}"
+        },
+        "configAdditiveFields": null,
+        "include": {
+          "searchd": "",
+          "rt": "",
+          "stopwords": "",
+          "exceptions": ""
+        },
+        "resources": {{- toJson .Values.manticore.resources }},
+        "readinessProbe": {{- toJson .Values.manticore.readinessProbe }},
+        "livenessProbe": {{- toJson .Values.manticore.livenessProbe }},
+        "startupProbe": {{- if semverCompare "<=1.20-0" .Capabilities.KubeVersion.GitVersion }}
+          {{- toJson (set .Values.manticore.startupProbe "enabled" false) }}
+        {{- else }}
+          {{- .Values.manticore.startupProbe | toJson }}
+        {{- end }}
+      },
+      "columnar": {
+        "ttl": {{ .Values.columnar.ttl }},
+        "enabled": {{ .Values.columnar.enabled }},
+        "service": {
+          "sqlPort": {{ .Values.columnar.service.sqlPort }},
+          "httpPort": {{ .Values.columnar.service.httpPort | default 9308 }}
+        },
+        "resources": {{- toJson .Values.columnar.resources }}
+      },
+      "rulesChecker": {
+        "enabled": false,
+        "maxMatchedPercent": 30,
+        "image": {
+          "repository": "{{ .Values.rulesChecker.image.repository }}",
+          "tag": "{{ .Values.rulesChecker.image.tag | default .Chart.AppVersion}}",
+          "imagePullPolicy": "{{ .Values.rulesChecker.image.imagePullPolicy }}"
+        },
+        "service": {
+          "port": {{ .Values.rulesChecker.service.port }},
+          "targetPort": {{ .Values.rulesChecker.service.targetPort }}
+        },
+        "resources": {{- toJson .Values.rulesChecker.resources }},
+        "readinessProbe": {{- toJson .Values.rulesChecker.readinessProbe }},
+        "livenessProbe": {{- toJson .Values.rulesChecker.livenessProbe }},
+        "startupProbe": {{- if semverCompare "<=1.20-0" .Capabilities.KubeVersion.GitVersion }}
+          {{- toJson (set .Values.rulesChecker.startupProbe "enabled" false) }}
+        {{- else }}
+          {{- .Values.rulesChecker.startupProbe | toJson }}
+        {{- end }}
+      },
+      "notifications": {
+        "telegram": {
+          "token": "{{ .Values.notifications.telegram.token }}",
+          "chatId": "{{ .Values.notifications.telegram.chatId }}"
+        }
+      }
+    }
+  nginx.conf: {{- .Values.ui.nginx.conf | toYaml | indent 2 }}
+  fpm.conf: |
+    pm.status_path = /status
+    pm.max_children = {{ .Values.ui.fpm.max_children }}
+    pm.start_servers = {{ .Values.ui.fpm.start_servers }}
+    pm.min_spare_servers = {{ .Values.ui.fpm.min_spare_servers }}
+    pm.max_spare_servers = {{ .Values.ui.fpm.max_spare_servers }}
+    pm.max_requests = {{ .Values.ui.fpm.max_requests }}
+    access.log = /dev/null

@@ -1,0 +1,20 @@
+{{- if .Values.columnar.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "manticore-streams.fullname" . }}-columnar-service
+  labels:
+    name: {{ include "manticore-streams.name" . }}
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+  - port: {{ .Values.columnar.service.sqlPort }}
+    targetPort: {{ .Values.columnar.service.sqlPort }}
+    name: client
+  - port: {{ .Values.columnar.service.httpPort | default 9308 }}
+    targetPort: {{ .Values.columnar.service.httpPort | default 9308 }}
+    name: http
+  selector:
+    name: {{ include "manticore-streams.name" . }}-columnar
+{{- end }}

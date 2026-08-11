@@ -1,0 +1,11 @@
+# GitHub Actions CI decisions
+
+The canonical repository is `manticoresoftware/streams` with `master` as its protected default branch. The only supported CI registry is `ghcr.io/manticoresoftware/streams`.
+
+GitHub Actions covers builds and tests only. It does not receive a kubeconfig, cloud credential, deployment environment permission, or documentation-deployment credential. The single `.github/workflows/ci.yml` workflow runs worker tests, image smoke builds, Helm validation, and change detection in parallel. Kubernetes E2E waits for those gates; publishing waits for successful E2E and runs only for a `master` push. Pull requests use `contents: read` and never publish images. Publishing uses the workflow-provided `GITHUB_TOKEN` with `packages: write`. Published GHCR images are private; runtime clusters provide their own pull secret through the chart's `imagePullSecrets` value. CI uses locally loaded kind images and disables this value.
+
+`helm-chart/Chart.yaml` keeps the development template `7.4.6-$Format:%h$`. GitHub source archives expand it to Git's abbreviated commit ID, so clients downloading a source archive receive a unique chart and app version such as `7.4.6-25d56244`. Actions materializes the same abbreviated SHA only in its disposable checkout before linting, E2E, and publishing image tags. It never commits that generated version; this preserves straightforward Helm development-to-development upgrades without version-only CI commits.
+
+Kubernetes E2E runs in an ephemeral kind `v1.32.5` cluster on a GitHub-hosted runner. This is the closest available official kind node image to the requested `v1.32.6`, which is not published. It builds all six images locally, loads them into kind, installs a pinned Kafka chart, and verifies the 9,418-record output delta. Kafka chart version `32.0.1` is pinned in `install-kafka.sh`; its first GitHub Actions execution must be recorded before making E2E a protected required check.
+
+Before enabling protected-branch enforcement, a repository administrator must confirm GHCR package creation/retention policy and configure branch protection for `master`. Required checks are `worker-tests`, Helm validation, image smoke checks, and `k8s-e2e` after five consecutive relevant successful E2E runs.

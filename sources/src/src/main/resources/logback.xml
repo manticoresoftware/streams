@@ -1,0 +1,30 @@
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Suppress Kafka logs -->
+    <logger name="org.apache.kafka" level="INFO"/>
+
+    <!-- Suppress JsonPath logs -->
+    <logger name="com.jayway.jsonpath" level="INFO"/>
+
+    <!-- Ensure manticore package logs at DEBUG -->
+    <logger name="manticore" level="DEBUG"/>
+
+    <!-- Suppress ManticoreColumnar error logs if desired (optional) -->
+    <logger name="manticore.Metrics.ManticoreColumnar" level="INFO"/>
+
+
+    <logger name="org.apache.http" level="INFO"/>
+    <logger name="org.apache.http.wire" level="INFO"/>
+    <logger name="org.apache.http.headers" level="INFO"/>
+    <logger name="org.apache.http.client" level="INFO"/>
+
+    <!-- Root logger set to DEBUG to align with LOG_LEVEL -->
+    <root level="debug">
+        <appender-ref ref="STDOUT" />
+    </root>
+</configuration>

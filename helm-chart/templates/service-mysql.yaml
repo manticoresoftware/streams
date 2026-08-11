@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "manticore-streams.fullname" . }}-mysql-service
+  labels:
+    name: {{ include "manticore-streams.name" . }}
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  selector:
+    name: {{ include "manticore-streams.name" . }}-mysql
+  ports:
+  - port: {{ .Values.mysql.service.port }}
+    targetPort: {{ .Values.mysql.service.targetPort | default .Values.mysql.service.port }}

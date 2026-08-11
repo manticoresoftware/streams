@@ -1,0 +1,11 @@
+.idea/*
+src/.idea/*
+/.DS_Store
+logs/*
+src/src/KafkaPublisher.iml
+helm-chart/charts/*
+helm-chart/templates/tests/*
+helm-chart/requirements.lock
+manticore-ui/_ide_helper.php
+manticore-ui/.idea/*
+manticore-ui/composer.lock

@@ -1,0 +1,146 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-post-hook
+  labels:
+    name: {{ .Chart.Name }}-post-hook
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: {{ .Values.ui.hooks.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.ui.hooks.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        name: {{ .Chart.Name }}-post-hook
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
+      securityContext:
+        fsGroup: {{ .Values.ui.userId }}
+      initContainers:
+      - name: wait-{{ .Chart.Name }}-post-hook-migrations
+        image: {{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag | default .Chart.AppVersion}}
+        imagePullPolicy: {{ .Values.ui.image.imagePullPolicy }}
+        command:
+          - sh
+          - -c
+          - |
+            for i in $(seq 1 {{ .Values.ui.migrationWait.maxAttempts }}); do
+              status_output="$(timeout 5 php artisan migrate:status 2>&1)"
+              status_code=$?
+
+              if [ "$status_code" -eq 0 ] && ! printf '%s\n' "$status_output" | grep -q 'Pending'; then
+                printf '%s\n' "$status_output"
+                echo "Database migrations are complete"
+                exit 0
+              fi
+
+              echo "Waiting for database migrations to complete ($i/{{ .Values.ui.migrationWait.maxAttempts }})"
+              sleep {{ .Values.ui.migrationWait.sleepSeconds }}
+            done
+
+            echo "Database migrations did not complete in time"
+            exit 1
+        securityContext:
+          runAsGroup: {{ .Values.ui.userId }}
+          runAsUser: {{ .Values.ui.userId }}
+        volumeMounts:
+          - name: process-config
+            mountPath: "/var/www/html/storage/config/process.json"
+            subPath: process.json
+            readOnly: true
+        env:
+          - name: DB_HOST
+            value: "{{ include "manticore-streams.fullname" . }}-mysql-service"
+          - name: DB_DATABASE
+            value: "{{.Values.ui.database.name}}"
+          - name: DB_USER
+            value: "{{.Values.ui.database.user}}"
+          - name: DB_SECRET
+            value: "{{ .Values.ui.database.secret }}"
+          - name: LOG_CHANNEL
+            value: "null"
+          - name: PHP_MEM_LIMIT
+            value: "1024"
+        resources:
+          {{- toYaml .Values.ui.initResources | nindent 10 }}
+      containers:
+      - name: {{ .Chart.Name }}-post-hook
+        image: {{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag | default .Chart.AppVersion}}
+        imagePullPolicy: {{ .Values.ui.image.imagePullPolicy }}
+        command: ["php",  "artisan", "chart:post-upgrade"]
+        securityContext:
+          runAsGroup: {{ .Values.ui.userId }}
+          runAsUser: {{ .Values.ui.userId }}
+        volumeMounts:
+          - name: process-config
+            mountPath: "/var/www/html/storage/config/process.json"
+            subPath: process.json
+            readOnly: true
+        env:
+          - name: DB_HOST
+            value: "{{ include "manticore-streams.fullname" . }}-mysql-service"
+          - name: DB_DATABASE
+            value: "{{.Values.ui.database.name}}"
+          - name: DB_USER
+            value: "{{.Values.ui.database.user}}"
+          - name: DB_SECRET
+            value: "{{ .Values.ui.database.secret }}"
+          - name: COLUMNAR_HOST
+            value: "{{ include "manticore-streams.fullname" . }}-columnar-service.{{ .Release.Namespace }}.svc.cluster.local"
+          - name: COLUMNAR_PORT
+            value: "{{.Values.columnar.service.sqlPort}}"
+          - name: MANTICORE_HOST
+            value: "{{ .Release.Name }}-{{ printf "{{ STREAM_ID }}" }}-pipeline-0.{{ printf "{{ STREAM_ID }}" }}-pipeline.{{ .Release.Namespace }}.svc.cluster.local"
+          - name: MANTICORE_PORT
+            value: "9306"
+          - name: SUPERADMIN_EMAIL
+            value: "{{.Values.ui.admin.email}}"
+          - name: SUPERADMIN_PASSWORD
+            value: "{{.Values.ui.admin.pass}}"
+          - name: RELEASE_NAME
+            value: "{{ .Release.Name }}"
+          - name: PACKAGE_NAME
+            value: "{{ include "manticore-streams.name" . }}"
+          - name: FULL_PACKAGE_NAME
+            value: "{{ include "manticore-streams.fullname" . }}"
+          - name: RELEASE_SERVICE
+            value: "{{ .Release.Service }}"
+          - name: CHART_NAME
+            value: "{{ include "manticore-streams.chart" . }}"
+          - name: NAMESPACE
+            value: "{{ .Release.Namespace }}"
+          - name: PHP_MEM_LIMIT
+            value: "1024"
+        readinessProbe:
+          {{- if .Values.ui.readinessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.ui.readinessProbe "enabled") "context" $) | nindent 8 }}
+          exec:
+            command:
+              - "sh"
+              - "-c"
+              - "pgrep -f 'php artisan chart:post-upgrade' && echo 'Job is running'"
+          {{- end }}
+        livenessProbe:
+          {{- if .Values.ui.livenessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.ui.livenessProbe "enabled") "context" $) | nindent 8 }}
+          exec:
+            command:
+              - "sh"
+              - "-c"
+              - "pgrep -f 'php artisan chart:post-upgrade' || exit 1"
+          {{- end }}
+        resources:
+          {{- toYaml .Values.ui.resources | nindent 10 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: process-config
+          configMap:
+            name: {{ include "manticore-streams.name" . }}-configmap

@@ -1,0 +1,134 @@
+version: "3"
+
+services:
+  kafka:
+    container_name: kafka
+    image: 'apache/kafka:4.0.1-rc2'
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+  manticore:
+    ports:
+      - "9306:9306"
+      - "9308:9308"
+    build:
+      context: ../docker/manticore
+      dockerfile: Dockerfile
+    container_name: manticore
+    platform: linux/amd64
+    environment:
+#      - MANTICORE_RULES=json=json|text=title|text=text|url=url
+      - MANTICORE_RULES=json=json|url=url|text=source|text=text|text=title|text=statustext|url=merged|url=merged2
+      - MANTICORE_PORT=9306
+      - PIPELINE=m
+      - MANTICORE_POD_NAME=po
+      - INSTANCE_LABEL=abc
+      - MANTICORE_STATEFUL_SET_NAME=stl
+      - MANTICORE_SERVICE_NAME=svc
+      - NAMESPACE_NAME=ns
+      - BLACKLIST_MODE=1
+      - QUERY_LOG_TO_STDOUT=true
+      - STAGE=dev
+  columnar:
+    image: manticoresearch/manticore:25.0.0
+    container_name: columnar
+    environment:
+      - EXTRA=1
+      - searchd_mysql_version_string=5.5.21
+      - searchd_max_packet_size=128M
+      - searchd_pid_file=/tmp/searchd.pid
+    ports:
+      - "19306:9306"
+      - "19308:9308"
+    volumes:
+      - ./manticore-columnar/:/var/lib/manticore
+  scaler:
+    depends_on: [columnar]
+    ports:
+      - "8808:8080"
+    build:
+      context: ./scaler
+      dockerfile: Dockerfile
+    container_name: scaler
+    volumes:
+      - ../docker/scaler:/var/www/html
+    command: ["php", "-S", "0.0.0.0:8080", "-t", "/var/www/html"]
+    environment:
+      - MAX_THREADS=10
+      - MAX_BATCH_SIZE=1000000
+      - NAMESPACE=""
+      - MAX_QUERY_PROCESSING_TIME=10
+      - MANTICORE_POD_NAME=""
+      - METRICS_STORAGE_HOST=columnar
+      - METRICS_STORAGE_PORT=9308
+  rules-checker:
+    ports:
+      - "8809:8080"
+    build:
+      context: ../docker/rules_checker
+      dockerfile: Dockerfile
+    container_name: rules-checker
+    depends_on:
+      - "kafka"
+      - "manticore"
+    environment:
+      - MANTICORE_HOST=manticore
+      - MANTICORE_PORT=9306
+      - PIPELINE=m
+      - MAX_MATCHED_PERCENT=20
+      - KAFKA_HOST=kafka:9092
+      - KAFKA_GROUP=test_group
+      - KAFKA_TOPIC=my-docs
+      - MANTICORE_FIELDS=json=json|url=url|text=source|text=text|text=title|text=statustext
+      - TRANSFORM_RULES=whole_document => json|text.comment.commenturl&&text.comment.status.thumbnail_pic&&text.comment.status.user.url => url|text.comment.status.source => source|text.comment.status.text => text|text.comment.text => title|text.status.text => statustext
+    volumes:
+      - ./rules-checker/:/storage/
+  ui:
+    depends_on: [mysql]
+    container_name: ui
+    user: root
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    environment:
+      DB_HOST: mysql
+      DB_DATABASE: mysql
+      DB_USERNAME: root
+      DB_PASSWORD: mysql
+    volumes:
+      - ../ui/:/var/www/html/
+  nginx:
+    depends_on: [ui, mysql]
+    ports:
+      - "8080:8080"
+    image: nginx:1.24.0
+    user: www-data
+    container_name: nginx
+    volumes:
+      - ../ui/:/var/www/html/
+      - ./ui/nginx-site.conf:/etc/nginx/nginx.conf
+  mysql:
+    image: mysql:5.7.22
+    platform: linux/x86_64
+    container_name: mysql
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "13306:3306"
+    environment:
+      MYSQL_DATABASE: mysql
+      MYSQL_ROOT_PASSWORD: mysql
+    volumes:
+      - ./mysql/data:/var/lib/mysql

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Chart.Name }}-ui-service
+  {{- if .Values.ui.service.loadBalancer.enabled }}
+  annotations:
+    metallb.universe.tf/allow-shared-ip: {{ .Values.ui.service.loadBalancer.ip | quote }}
+  {{- end }}
+  labels:
+    name: {{ include "manticore-streams.name" . }}
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+{{- if .Values.ui.service.loadBalancer.enabled }}
+  type: LoadBalancer
+  loadBalancerIP: {{ .Values.ui.service.loadBalancer.ip }}
+{{- end }}
+  selector:
+    name: {{ .Chart.Name }}-ui
+  ports:
+  - port: {{ .Values.ui.service.port }}
+    targetPort: {{ .Values.ui.service.targetPort }}

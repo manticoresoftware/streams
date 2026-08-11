@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+    name: configmap-p{{ PROCESS }}
+    labels:
+      name: configmap-p{{ PROCESS }}
+      helm.sh/chart: {{ CHART_NAME }}
+      app.kubernetes.io/instance: {{ RELEASE_NAME }}
+      app.kubernetes.io/managed-by: {{ RELEASE_SERVICE }}
+      app.kubernetes.io/app: p{{ PROCESS }}-process
+data:
+  searchd_include.conf: |
+      {{ Values.manticore.include.searchd }}
+  rt_include.conf: |
+      {{ Values.manticore.include.rt }}
+  stopwords.txt: |
+      {{ Values.manticore.include.stopwords }}
+  exceptions.txt: |
+      {{ Values.manticore.include.exceptions }}

@@ -1,0 +1,10 @@
+/src/.idea
+.idea
+/src/composer.lock
+
+/helm-chart/charts
+/helm-chart/requirements.lock
+/backup/backups/
+/docker/worker/KafkaHandler.jar
+/docker/ui/source/
+/docker/ui-nginx/source/

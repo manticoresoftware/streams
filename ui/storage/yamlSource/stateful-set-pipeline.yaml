@@ -1,0 +1,294 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ RELEASE_NAME }}-m{{ STREAM_ID }}-pipeline
+  namespace: {{ NAMESPACE }}
+  labels:
+    name: m{{ STREAM_ID }}-pipeline
+    streamID: "{{ STREAM_ID }}"
+    helm.sh/chart: {{ CHART_NAME }}
+    app.kubernetes.io/managed-by: {{ RELEASE_SERVICE }}
+    app.kubernetes.io/app: {{ FULLNAME }}-m{{ STREAM_ID }}-pipeline
+    app.kubernetes.io/pipeline: "m{{ STREAM_ID }}"
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ Values.worker.minThreads }}
+  selector:
+    matchLabels:
+      name:  m{{ STREAM_ID }}-pipeline
+  serviceName: m{{ STREAM_ID }}-pipeline
+  template:
+    metadata:
+      labels:
+        name: m{{ STREAM_ID }}-pipeline
+        label: "m{{ STREAM_ID }}"
+        app.kubernetes.io/instance: {{ RELEASE_NAME }}
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/pipeline: "m{{ STREAM_ID }}"
+      annotations:
+        prometheus.io/port: "8081"
+        prometheus.io/scrape: "true"
+    spec:
+      serviceAccountName: ui-admin-sa-{{ NAMESPACE }}
+      securityContext:
+        fsGroup: {{ Values.manticore.userId }}
+      {{- if Values.worker.nodeSelector }}
+      nodeSelector: {{ Values.worker.nodeSelector | toYaml 8 }}
+      {{- end }}
+      {{- if Values.worker.tolerations }}
+      tolerations: {{ Values.worker.tolerations | toYaml 8 }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/instance
+                      operator: In
+                      values:
+                        - {{ RELEASE_NAME }}
+                topologyKey: kubernetes.io/hostname
+              weight: 100
+      volumes:
+        - name: configmap-p{{ PROCESS }}
+          configMap:
+            name: configmap-p{{ PROCESS }}
+      containers:
+      - name: m{{ STREAM_ID }}-manticore
+        image: {{ Values.manticore.image.repository }}:{{ Values.manticore.image.tag }}
+        imagePullPolicy: {{ Values.manticore.image.imagePullPolicy }}
+        securityContext:
+            runAsGroup: {{ Values.manticore.userId }}
+            runAsUser: {{ Values.manticore.userId }}
+        lifecycle:
+          preStop:
+            exec:
+              command: ["searchd","--stopwait"]
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/manticore/
+        - name: configmap-p{{ PROCESS }}
+          mountPath: /etc/manticoresearch/conf_mount
+        env:
+          - name: INSTANCE_LABEL
+            value: {{ RELEASE_NAME }}
+          - name: PIPELINE
+            value: "m{{ STREAM_ID }}"
+          - name: MANTICORE_SERVICE_PATH
+            value: ".m{{ STREAM_ID }}-pipeline.{{ NAMESPACE }}.svc.cluster.local"
+          - name: MANTICORE_RULES
+            value: "{{ Values.manticore.configAdditiveFields }}"
+          - name: MANTICORE_PORT
+            value: "{{ Values.manticore.service.sqlPort }}"
+          - name: BLACKLIST_MODE
+            value: "{{ Values.manticore.searchd.blacklist-mode }}"
+          - name: TELEGRAM_TOKEN
+            value: "{{ Values.notifications.telegram.token }}"
+          - name: TELEGRAM_CHAT_ID
+            value: "{{ Values.notifications.telegram.chatId }}"
+          - name: dump_corrupt_meta
+            value: "_corrupt_meta_"
+        {{- if Values.manticore.livenessProbe.enabled }}
+        livenessProbe:
+          failureThreshold: {{ Values.manticore.livenessProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.manticore.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.manticore.livenessProbe.periodSeconds }}
+          successThreshold: {{ Values.manticore.livenessProbe.successThreshold }}
+          timeoutSeconds: {{ Values.manticore.livenessProbe.timeoutSeconds }}
+          exec:
+            command: [ "/etc/manticoresearch/l_probe.sh" ]
+        {{- end }}
+        {{- if Values.manticore.readinessProbe.enabled }}
+        readinessProbe:
+          failureThreshold: {{ Values.manticore.readinessProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.manticore.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.manticore.readinessProbe.periodSeconds }}
+          successThreshold: {{ Values.manticore.readinessProbe.successThreshold }}
+          timeoutSeconds: {{ Values.manticore.readinessProbe.timeoutSeconds }}
+          exec:
+            command: [ "/etc/manticoresearch/r_probe.sh" ]
+        {{- end }}
+        {{- if Values.manticore.startupProbe.enabled }}
+        startupProbe:
+          failureThreshold: {{ Values.manticore.startupProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.manticore.startupProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.manticore.startupProbe.periodSeconds }}
+          successThreshold: {{ Values.manticore.startupProbe.successThreshold }}
+          timeoutSeconds: {{ Values.manticore.startupProbe.timeoutSeconds }}
+          exec:
+            command: [ "/etc/manticoresearch/l_probe.sh" ]
+        {{- end }}
+        resources: {{ Values.manticore.resources | toYaml 10 }}
+      - name: {{ NAME }}-m{{ STREAM_ID }}-worker
+        image: {{ Values.worker.image.repository }}:{{ Values.worker.image.tag }}
+        imagePullPolicy: {{ Values.worker.image.imagePullPolicy }}
+        env:
+          - name: LABEL
+            value: "m{{ STREAM_ID }}"
+          - name: OUTPUT_DOCS
+            value: "{{ Values.worker.outputDocs }}"
+          - name: TRANSFORM_RULES
+            value: "{{ Values.worker.handlerRules }}"
+          - name: MANTICORE_FIELDS
+            value: "{{ Values.manticore.configAdditiveFields }}"
+          - name: SUSPEND
+            value: "{{ Values.worker.suspend }}"
+          - name: MAX_MESSAGE_SIZE
+            value: "{{ Values.worker.maxKafkaMessage }}"
+          - name: LOG_LEVEL
+            value: "{{ Values.worker.loglevel }}"
+          - name: SKIP_EXCEEDED_MESSAGES
+            value: "{{ Values.worker.skipExceededMessages }}"
+          - name: SCALER_HOST
+            value: {{ FULLNAME }}-scaler-service
+          - name: KAFKA_INPUT_HOST
+            value: {{ Values.kafka.inputHost }}
+          - name: KAFKA_OUTPUT_HOST
+            value: {{ Values.kafka.outputHost }}
+          - name: MANTICORE_HOST
+            value: "localhost:{{ Values.manticore.service.sqlPort }}"
+          - name: MANTICORE_HTTP_PORT
+            value: "{{ Values.manticore.service.httpPort }}"
+          - name: KAFKA_INPUT_TOPIC
+            value: {{ Values.kafka.inputTopic }}
+          - name: KAFKA_OUTPUT_TOPIC
+            value: {{ Values.kafka.outputTopic }}
+          - name: KAFKA_GROUP_NAME
+            value: {{ Values.kafka.groupName }}
+          - name: KAFKA_FETCH_MIN_BYTES
+            value: "{{ Values.kafka.fetch_min_bytes }}"
+          - name: KAFKA_FETCH_MAX_WAIT_MS
+            value: "{{ Values.kafka.fetch_max_wait_ms }}"
+          - name: KAFKA_FETCH_MAX_BYTES
+            value: "{{ Values.kafka.fetch_max_bytes }}"
+          - name: KAFKA_MAX_POLL_RECORDS
+            value: "{{ Values.kafka.max_poll_records }}"
+          - name: INACTIVITY_THRESHOLD
+            value: "{{ Values.worker.inactivityThreshold }}"
+          - name: MIN_THREADS
+            value: "{{ Values.worker.minThreads }}"
+          - name: MAX_THREADS
+            value: "{{ Values.worker.maxThreads }}"
+          - name: MAX_MANTICORE_QUERY_TIMEOUT
+            value: "{{ Values.worker.maxManticoreQueryTimeout }}"
+          - name: PROCESSED_MEASURE_TIME
+            value: "{{ Values.worker.processedMeasureTime }}"
+          - name: PROCESSING_NAME
+            value: "{{ PROCESSING_NAME }}"
+          - name: MAX_BATCH_SIZE
+            value: "{{ Values.worker.maxBatchSize }}"
+          - name: PROMETHEUS_DISABLE_CREATED_SERIES
+            value: "true"
+          {{- if Values.worker.jsltEnabled }}
+          - name: JSLT_CONFIG
+            value: "{{ Values.worker.jsltConf }}"
+          {{- end }}
+          - name: METRICS_STORAGE_HOST
+            value: {{ FULLNAME }}-columnar-service
+          - name: METRICS_STORAGE_PORT
+            value: "{{ Values.columnar.service.httpPort }}"
+        {{- if Values.worker.readinessProbe.enabled }}
+        readinessProbe:
+          failureThreshold: {{ Values.worker.readinessProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.worker.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.worker.readinessProbe.periodSeconds }}
+          successThreshold: {{ Values.worker.readinessProbe.successThreshold }}
+          timeoutSeconds: {{ Values.worker.readinessProbe.timeoutSeconds }}
+          exec:
+            command: ['/bin/sh', '-c', '/usr/src/myapp/check.sh']
+        {{- end }}
+        {{- if Values.worker.livenessProbe.enabled }}
+        livenessProbe:
+          failureThreshold: {{ Values.worker.livenessProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.worker.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.worker.livenessProbe.periodSeconds }}
+          successThreshold: {{ Values.worker.livenessProbe.successThreshold }}
+          timeoutSeconds: {{ Values.worker.livenessProbe.timeoutSeconds }}
+          exec:
+            command: ['/bin/sh', '-c', '/usr/src/myapp/check.sh']
+        {{- end }}
+        {{- if Values.worker.startupProbe.enabled }}
+        startupProbe:
+          failureThreshold: {{ Values.worker.startupProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.worker.startupProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.worker.startupProbe.periodSeconds }}
+          successThreshold: {{ Values.worker.startupProbe.successThreshold }}
+          timeoutSeconds: {{ Values.worker.startupProbe.timeoutSeconds }}
+          exec:
+            command: [ '/bin/sh', '-c', '/usr/src/myapp/check.sh' ]
+        {{- end }}
+        resources: {{ Values.worker.resources | toYaml 10 }}
+      {{- if Values.rulesChecker.enabled }}
+      - name: m{{ STREAM_ID }}-job-rules-checker
+        image: {{ Values.rulesChecker.image.repository }}:{{ Values.rulesChecker.image.tag }}
+        imagePullPolicy: {{ Values.rulesChecker.image.imagePullPolicy }}
+        env:
+          - name: PIPELINE
+            value: "m{{ STREAM_ID }}"
+          - name: MANTICORE_HOST
+            value: "0"
+          - name: MANTICORE_PORT
+            value: "{{ Values.manticore.service.sqlPort }}"
+          - name: TRANSFORM_RULES
+            value: "{{ Values.worker.handlerRules }}"
+          - name: MANTICORE_FIELDS
+            value: "{{ Values.manticore.configAdditiveFields }}"
+          - name: MAX_MATCHED_PERCENT
+            value: "{{ Values.rulesChecker.maxMatchedPercent }}"
+          - name: KAFKA_HOST
+            value: {{ Values.kafka.inputHost }}
+          - name: KAFKA_GROUP
+            value: "m{{ STREAM_ID }}_query_compexity"
+          - name: KAFKA_TOPIC
+            value: {{ Values.kafka.inputTopic }}
+        {{- if Values.rulesChecker.readinessProbe.enabled }}
+        readinessProbe:
+          failureThreshold: {{ Values.rulesChecker.readinessProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.rulesChecker.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.rulesChecker.readinessProbe.periodSeconds }}
+          successThreshold: {{ Values.rulesChecker.readinessProbe.successThreshold }}
+          timeoutSeconds: {{ Values.rulesChecker.readinessProbe.timeoutSeconds }}
+          httpGet:
+            path: /
+            port: {{ Values.rulesChecker.service.targetPort }}
+            scheme: HTTP
+        {{- end }}
+        {{- if Values.rulesChecker.livenessProbe.enabled }}
+        livenessProbe:
+          failureThreshold: {{ Values.rulesChecker.livenessProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.rulesChecker.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.rulesChecker.livenessProbe.periodSeconds }}
+          successThreshold: {{ Values.rulesChecker.livenessProbe.successThreshold }}
+          timeoutSeconds: {{ Values.rulesChecker.livenessProbe.timeoutSeconds }}
+          httpGet:
+            path: /
+            port: {{ Values.rulesChecker.service.targetPort }}
+            scheme: HTTP
+        {{- end }}
+        {{- if Values.rulesChecker.startupProbe.enabled }}
+        startupProbe:
+          failureThreshold: {{ Values.rulesChecker.startupProbe.failureThreshold }}
+          initialDelaySeconds: {{ Values.rulesChecker.startupProbe.initialDelaySeconds }}
+          periodSeconds: {{ Values.rulesChecker.startupProbe.periodSeconds }}
+          successThreshold: {{ Values.rulesChecker.startupProbe.successThreshold }}
+          timeoutSeconds: {{ Values.rulesChecker.startupProbe.timeoutSeconds }}
+          httpGet:
+            path: /
+            port: {{ Values.rulesChecker.service.targetPort }}
+            scheme: HTTP
+        {{- end }}
+        resources: {{ Values.rulesChecker.resources | toYaml 10 }}
+      {{- end }}
+      imagePullSecrets:
+      - name: registry-manticore-streams
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      labels:
+          streamID: "{{ STREAM_ID }}"
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ Values.manticore.volumeClaimTemplates.size }}

@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "manticore-streams.fullname" . }}-scaler
+  labels:
+    name: {{ include "manticore-streams.name" . }}-scaler
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: {{ include "manticore-streams.fullname" . }}-scaler
+  template:
+    metadata:
+      labels:
+        name: {{ include "manticore-streams.fullname" . }}-scaler
+    spec:
+      serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
+      initContainers:
+      - name: {{ .Chart.Name }}-scaler-init
+        image: {{ .Values.scaler.php.image.repository }}:{{ .Values.scaler.php.image.tag | default .Chart.AppVersion}}
+        imagePullPolicy: {{ .Values.scaler.php.image.imagePullPolicy }}
+        command: ["/bin/sh", "/scaler_source_code/init.sh"]
+        securityContext:
+          runAsGroup: 0
+          runAsUser: 0
+        volumeMounts:
+          - name: shared-volume
+            mountPath: /var/www/html
+        resources:
+          {{- toYaml .Values.scaler.initResources | nindent 10 }}
+      containers:
+      - name: {{ .Chart.Name }}-scaler-php
+        image: {{ .Values.scaler.php.image.repository }}:{{ .Values.scaler.php.image.tag | default .Chart.AppVersion}}
+        imagePullPolicy: {{ .Values.scaler.php.image.imagePullPolicy }}
+        securityContext:
+          runAsGroup: {{ .Values.scaler.nginx.userId }}
+          runAsUser: {{ .Values.scaler.nginx.userId }}
+        env:
+        - name: METRICS_STORAGE_URL
+          value: "{{ include "manticore-streams.fullname" . }}-columnar-service.{{ .Release.Namespace }}.svc.cluster.local:{{.Values.columnar.service.sqlPort}}"
+        - name: MAX_QUERY_PROCESSING_TIME
+          value: "{{ .Values.worker.maxQueryProcessingTime }}"
+        - name: RELEASE_NAME
+          value: {{ .Release.Name }}
+        readinessProbe:
+          {{- if .Values.scaler.readinessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.scaler.readinessProbe "enabled") "context" $) | nindent 8 }}
+          httpGet:
+            path: /index.php?health=1
+            port: {{ .Values.scaler.service.targetPort }}
+            scheme: HTTP
+          {{- end }}
+        livenessProbe:
+          {{- if .Values.scaler.livenessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.scaler.livenessProbe "enabled") "context" $) | nindent 8 }}
+          httpGet:
+            path: /index.php?health=1
+            port: {{ .Values.scaler.service.targetPort }}
+            scheme: HTTP
+          {{- end }}
+        {{- if semverCompare ">=1.20-0" $.Capabilities.KubeVersion.GitVersion }}
+        startupProbe:
+          {{- if .Values.scaler.startupProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.scaler.startupProbe "enabled") "context" $) | nindent 8 }}
+          httpGet:
+            path: /index.php?health=1
+            port: {{ .Values.scaler.service.targetPort }}
+            scheme: HTTP
+          {{- end }}
+        {{- end }}
+        volumeMounts:
+          - name: shared-volume
+            mountPath: /var/www/html
+          - name: config-volume
+            mountPath: /usr/local/etc/php-fpm.d/www.conf
+            subPath: www.conf
+        resources:
+          {{- toYaml .Values.scaler.php.resources | nindent 10 }}
+      - name: {{ .Chart.Name }}-scaler-nginx
+        image: {{ .Values.scaler.nginx.image.repository }}:{{ .Values.scaler.nginx.image.tag }}
+        imagePullPolicy: {{ .Values.scaler.nginx.image.imagePullPolicy }}
+        ports:
+        - containerPort: {{ .Values.scaler.service.targetPort }}
+        readinessProbe:
+          {{- if .Values.scaler.readinessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.scaler.readinessProbe "enabled") "context" $) | nindent 8 }}
+          exec:
+            command:
+              - sh
+              - -c
+              - curl -fsS http://localhost:{{ .Values.scaler.service.targetPort }}/nginx_status
+          {{- end }}
+        livenessProbe:
+          {{- if .Values.scaler.livenessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.scaler.livenessProbe "enabled") "context" $) | nindent 8 }}
+          exec:
+            command:
+              - curl
+              - http://localhost:{{ .Values.scaler.service.targetPort }}/nginx_status
+          {{- end }}
+        {{- if semverCompare ">=1.20-0" $.Capabilities.KubeVersion.GitVersion }}
+        startupProbe:
+          {{- if .Values.scaler.startupProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.scaler.startupProbe "enabled") "context" $) | nindent 8 }}
+          exec:
+            command:
+              - sh
+              - -c
+              - curl -fsS http://localhost:{{ .Values.scaler.service.targetPort }}/nginx_status
+          {{- end }}
+        {{- end }}
+        securityContext:
+          runAsGroup: {{ .Values.scaler.nginx.userId }}
+          runAsUser: {{ .Values.scaler.nginx.userId }}
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: shared-volume
+          mountPath: /var/www/html
+        resources:
+          {{- toYaml .Values.scaler.nginx.resources | nindent 10 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ .Chart.Name }}-scaler-config
+        - name: shared-volume
+          emptyDir: {}

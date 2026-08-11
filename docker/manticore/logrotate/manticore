@@ -1,0 +1,10 @@
+/var/lib/manticore/*.log {
+       hourly
+       rotate 3
+       copytruncate
+       delaycompress
+       compress
+       notifempty
+       missingok
+       size 50M
+}

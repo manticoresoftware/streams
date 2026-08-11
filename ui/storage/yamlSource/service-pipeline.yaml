@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: m{{ STREAM_ID }}-pipeline
+  namespace: {{ NAMESPACE }}
+  labels:
+    name: {{ NAME }}
+    streamID: "{{ STREAM_ID }}"
+    helm.sh/chart: {{ CHART_NAME }}
+    app.kubernetes.io/instance: {{ RELEASE_NAME }}
+    app.kubernetes.io/managed-by: {{ RELEASE_SERVICE }}
+    app.kubernetes.io/app: m{{ STREAM_ID }}-pipeline
+spec:
+  selector:
+    name: m{{ STREAM_ID }}-pipeline
+  ports:
+    - port: {{ Values.manticore.service.sqlPort }}
+      targetPort: {{ Values.manticore.service.sqlPort }}
+      name: manticore-sql
+    - port: {{ Values.manticore.service.httpPort }}
+      targetPort: {{ Values.manticore.service.httpPort }}
+      name: manticore-http
+    - port: {{ Values.rulesChecker.service.port }}
+      targetPort: {{ Values.rulesChecker.service.targetPort }}
+      name: rules

@@ -1,0 +1,11 @@
+/target/
+/src/KafkaPublisher.iml
+/logs/*
+.run
+/.idea/
+/.DS_Store
+/.classpath
+/.factorypath
+/.project
+/.settings/*
+Dockerfile

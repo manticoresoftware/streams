@@ -1,0 +1,133 @@
+{
+    "kafka": {
+        "inputHost": null,
+        "outputHost": null,
+        "inputTopic": null,
+        "outputTopic": null,
+        "groupName": null,
+        "fetch_min_bytes": 1,
+        "fetch_max_wait_ms": 500,
+        "fetch_max_bytes": 1048576,
+        "max_poll_records": 500
+    },
+    "worker": {
+        "minThreads": null,
+        "maxThreads": null,
+        "maxBatchSize": null,
+        "maxManticoreQueryTimeout": 300,
+        "processedMeasureTime": null,
+        "maxKafkaMessage": 998000,
+        "inactivityThreshold": 180,
+        "loglevel": "WARN",
+        "skipExceededMessages": true,
+        "image": {
+            "repository": "ghcr.io/manticoresoftware/streams/worker",
+            "tag": "dev",
+            "imagePullPolicy": "IfNotPresent"
+        },
+        "outputDocs": null,
+        "jsltEnabled": null,
+        "jsltConf": null,
+        "transformRules": null,
+        "handlerRules": null,
+        "volumeClaimTemplates": {
+            "size": "500Mi"
+        },
+        "nodeSelector": {},
+        "tolerations": {},
+        "resources": {
+            "requests": {
+                "memory": "6Gi",
+                "cpu": "2"
+            },
+            "limits": {
+                "memory": "6Gi",
+                "cpu": "2"
+            }
+        },
+        "readinessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1},
+        "livenessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1},
+        "startupProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1}
+    },
+    "manticore": {
+        "exposeOutside": false,
+        "exposePort": null,
+        "userId": 999,
+        "image": {
+            "repository": "ghcr.io/manticoresoftware/streams/manticore",
+            "tag": "dev",
+            "imagePullPolicy": "IfNotPresent"
+        },
+        "searchd": {
+            "blacklist-mode": 0
+        },
+        "service": {
+            "sqlPort": 9306,
+            "httpPort": 9308
+        },
+        "volumeClaimTemplates": {
+            "size": "1Gi"
+        },
+        "configAdditiveFields": null,
+        "include": {
+            "searchd": "",
+            "rt": "",
+            "stopwords": "",
+            "exceptions": ""
+        },
+        "resources":{
+            "requests": {
+                "memory": "512Mi",
+                "cpu": "100m"
+            },
+            "limits": {
+                "memory": "1024Mi",
+                "cpu": "500m"
+            }
+        },
+        "readinessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1},
+        "livenessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1},
+        "startupProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1}
+    },
+    "columnar": {
+        "ttl": 31,
+        "enabled": true,
+        "service": {
+            "sqlPort": 9306,
+            "httpPort": 9308
+        },
+        "resources":{}
+    },
+    "rulesChecker": {
+        "enabled": false,
+        "maxMatchedPercent": null,
+        "image": {
+            "repository": "ghcr.io/manticoresoftware/streams/rules_checker",
+            "tag": "dev",
+            "imagePullPolicy": "IfNotPresent"
+        },
+        "service": {
+            "port": 80,
+            "targetPort": 8080
+        },
+        "resources":{
+            "requests": {
+                "memory": "128Mi",
+                "cpu": "100m"
+            },
+            "limits": {
+                "memory": "512Mi",
+                "cpu": "500m"
+            }
+        },
+        "readinessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1},
+        "livenessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1},
+        "startupProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":1}
+    },
+    "notifications": {
+        "telegram": {
+            "token": "",
+            "chatId": ""
+        }
+    }
+}

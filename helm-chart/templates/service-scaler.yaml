@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "manticore-streams.fullname" . }}-scaler-service
+  labels:
+    name: {{ include "manticore-streams.name" . }}
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  selector:
+    name: {{ include "manticore-streams.fullname" . }}-scaler
+  ports:
+  - port: {{ .Values.scaler.service.port }}
+    targetPort: {{ .Values.scaler.service.targetPort }}
+    name: http-metrics
+

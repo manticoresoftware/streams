@@ -1,0 +1,3 @@
+helm-chart/Chart.yaml export-subst
+docker/config.sh export-subst
+

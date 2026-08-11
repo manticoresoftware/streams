@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-ui-migrate-%d" (.Release.Name | trunc 40 | trimSuffix "-") .Release.Revision }}
+  labels:
+    name: {{ .Chart.Name }}-ui-migrate
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.ui.hooks.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.ui.hooks.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.ui.hooks.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        name: {{ .Chart.Name }}-ui-migrate
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
+      securityContext:
+        fsGroup: {{ .Values.ui.userId }}
+      containers:
+      - name: {{ .Chart.Name }}-ui-migrate
+        image: {{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag | default .Chart.AppVersion}}
+        imagePullPolicy: {{ .Values.ui.image.imagePullPolicy }}
+        command: ["php", "artisan", "chart:migrate"]
+        securityContext:
+          runAsGroup: {{ .Values.ui.userId }}
+          runAsUser: {{ .Values.ui.userId }}
+        volumeMounts:
+          - name: process-config
+            mountPath: "/var/www/html/storage/config/process.json"
+            subPath: process.json
+            readOnly: true
+        env:
+          - name: DB_HOST
+            value: "{{ include "manticore-streams.fullname" . }}-mysql-service"
+          - name: DB_DATABASE
+            value: "{{.Values.ui.database.name}}"
+          - name: DB_USER
+            value: "{{.Values.ui.database.user}}"
+          - name: DB_SECRET
+            value: "{{ .Values.ui.database.secret }}"
+          - name: SUPERADMIN_EMAIL
+            value: "{{.Values.ui.admin.email}}"
+          - name: SUPERADMIN_PASSWORD
+            value: "{{.Values.ui.admin.pass}}"
+          - name: PHP_MEM_LIMIT
+            value: "1024"
+        resources:
+          {{- toYaml .Values.ui.initResources | nindent 10 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: process-config
+          configMap:
+            name: {{ include "manticore-streams.name" . }}-configmap

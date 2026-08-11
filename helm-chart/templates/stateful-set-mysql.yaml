@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "manticore-streams.fullname" . }}-ui-mysql
+  labels:
+    name: {{ include "manticore-streams.name" . }}-mysql
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name:  {{ include "manticore-streams.name" . }}-mysql
+  serviceName: {{ include "manticore-streams.fullname" . }}-mysql-service
+  template:
+    metadata:
+      labels:
+        name: {{ include "manticore-streams.name" . }}-mysql
+    spec:
+      serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
+      securityContext:
+        fsGroup: {{ .Values.mysql.userId }}
+        runAsNonRoot: true
+        runAsUser: {{ .Values.mysql.userId }}
+      containers:
+      - name: {{ .Chart.Name }}-mysql
+        image: {{ .Values.mysql.image.repository }}:{{ .Values.mysql.image.tag }}
+        imagePullPolicy: {{ .Values.mysql.image.imagePullPolicy }}
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        args: {{ .Values.mysql.args | toJson }}
+        env:
+          - name: MYSQL_USER
+            value: "{{ .Values.ui.database.user }}"
+          - name: MYSQL_ROOT_PASSWORD
+            value: "{{ .Values.ui.database.secret }}"
+          - name: MYSQL_PASSWORD
+            value: "{{ .Values.ui.database.secret }}"
+          - name: MYSQL_DATABASE
+            value: "{{ .Values.ui.database.name }}"
+        readinessProbe:
+          {{- if .Values.mysql.readinessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.mysql.readinessProbe "enabled") "context" $) | nindent 8 }}
+          tcpSocket:
+            port: {{ .Values.mysql.service.port }}
+          {{- end }}
+        livenessProbe:
+          {{- if .Values.mysql.livenessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.mysql.livenessProbe "enabled") "context" $) | nindent 8 }}
+          tcpSocket:
+            port: {{ .Values.mysql.service.port }}
+          {{- end }}
+        {{- if semverCompare ">=1.20-0" $.Capabilities.KubeVersion.GitVersion }}
+        startupProbe:
+          {{- if .Values.mysql.startupProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.mysql.startupProbe "enabled") "context" $) | nindent 8 }}
+          tcpSocket:
+            port: {{ .Values.mysql.service.port }}
+          {{- end }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.mysql.resources | nindent 10 }}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.mysql.volumeClaimTemplates.size | quote }}

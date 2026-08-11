@@ -1,0 +1,460 @@
+imagePullSecrets:
+  - name: registry-manticore-streams
+
+ui:
+  replicas: 1
+  userId: 33
+  admin:
+    email: manticore@example.com
+    pass: changeme947
+  database:
+    name: manticore_kafka_ui
+    user: ms
+    secret: mysqlSecret
+  image:
+    repository: ghcr.io/manticoresoftware/streams/ui
+    imagePullPolicy: IfNotPresent
+  #    tag: 0.0.1
+  service:
+    port: 80
+    targetPort: 8080
+    loadBalancer:
+      enabled: false
+      ip: 192.168.0.1
+  volumeClaimTemplates:
+    size: 200Mi
+  livenessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  initResources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  hooks:
+    backoffLimit: 1
+    activeDeadlineSeconds: 600
+  migrationWait:
+    maxAttempts: 120
+    sleepSeconds: 5
+  fpm:
+    max_children: 200
+    start_servers: 13
+    min_spare_servers: 10
+    max_spare_servers: 16
+    max_requests: 10000
+  nginx:
+    image:
+      repository: ghcr.io/manticoresoftware/streams/ui-nginx
+      imagePullPolicy: IfNotPresent
+#      tag: 0.0.1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    conf: |
+      pid        /tmp/nginx.pid;
+      error_log  /dev/stderr;
+      events {
+      }
+      http {
+          client_body_temp_path /tmp/client_temp;
+          proxy_temp_path       /tmp/proxy_temp_path;
+          fastcgi_temp_path     /tmp/fastcgi_temp;
+          uwsgi_temp_path       /tmp/uwsgi_temp;
+          scgi_temp_path        /tmp/scgi_temp;
+          log_format custom '$remote_addr [$time_local] $request_time $request $status';
+          server {
+              listen 8080 default_server;
+              listen [::]:8080 default_server;
+              client_body_buffer_size     50M;
+              client_max_body_size        50M;
+              proxy_buffering off;
+              proxy_request_buffering off;
+              proxy_cache off;
+              root /var/www/html/public;
+              access_log /dev/stdout custom;
+              index index.php;
+              server_name _;
+              include  /etc/nginx/mime.types;
+              location / {
+                  try_files $uri $uri/ /index.php$is_args$args;
+              }
+              location /nginx_status {
+                 stub_status;
+                 allow 127.0.0.1;
+                 deny all;
+              }
+              location ~ ^/(status|ping)$ {
+                  include fastcgi_params;
+                  allow 127.0.0.1;
+                  fastcgi_param REQUEST_METHOD $request_method;
+                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                  fastcgi_pass 127.0.0.1:9000;
+                  fastcgi_index index.php;
+              }
+              location ~ \.php$ {
+                  try_files $uri /index.php =404;
+                  include fastcgi_params;
+                  fastcgi_param REQUEST_METHOD $request_method;
+                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+                  fastcgi_pass 127.0.0.1:9000;
+              }
+          }
+      }
+
+
+mysql:
+  userId: 999
+  image:
+    repository: docker.io/mysql
+    imagePullPolicy: IfNotPresent
+    tag: 5.6
+  service:
+    port: 3306
+  volumeClaimTemplates:
+    size: 1Gi
+  livenessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Allow to pass arguments like --wait-timeout=180
+  args: [
+  "--wait-timeout=180",
+  "--interactive-timeout=180"
+  ]
+
+scaler:
+  php:
+    image:
+      repository: ghcr.io/manticoresoftware/streams/scaler
+      imagePullPolicy: IfNotPresent
+#      tag: 0.0.1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    config:
+      user: www-data
+      max_children: 50
+      start_servers: 33
+      min_spare_servers: 18
+      max_spare_servers: 38
+      max_requests: 10000
+  nginx:
+    image:
+      repository: nginxinc/nginx-unprivileged
+      tag: 1.24.0
+      imagePullPolicy: IfNotPresent
+    userId: 33
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+  service:
+    port: 80
+    targetPort: 8080
+  initResources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  livenessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+
+columnar:
+  enabled: true
+  ttl: 31
+  debug_cleaner_delay: 180
+  image:
+    repository: manticoresearch/manticore
+    imagePullPolicy: IfNotPresent
+    tag: 17.5.1
+  service:
+    sqlPort: 9306
+    httpPort: 9308
+  volumeClaimTemplates:
+    size: 4Gi
+  userId: 999
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2048Mi
+  livenessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  cleaner:
+    backoffLimit: 1
+    activeDeadlineSeconds: 1800
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+worker:
+  image:
+    repository: ghcr.io/manticoresoftware/streams/worker
+    imagePullPolicy: IfNotPresent
+  #    tag: 0.0.1
+  processedMeasureTime: 60
+  maxQueryProcessingTime: 10
+  maxKafkaMessage: 998000
+  maxManticoreQueryTimeout: 300
+  skipExceededMessages: true
+  inactivityThreshold: 180
+  loglevel: INFO
+  resources:
+    requests:
+      cpu: "2"
+      memory: 6Gi
+    limits:
+      cpu: "2"
+      memory: 6Gi
+  nodeSelector: {}
+  tolerations: {}
+  livenessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+
+manticore:
+  image:
+    repository: ghcr.io/manticoresoftware/streams/manticore
+    imagePullPolicy: IfNotPresent
+  #    tag: 0.0.1
+  service:
+    sqlPort: 9306
+    httpPort: 9308
+  volumeSize: 1Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1024Mi
+  livenessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+
+rulesChecker:
+  image:
+    repository: ghcr.io/manticoresoftware/streams/rules_checker
+    imagePullPolicy: IfNotPresent
+  #    tag: 0.0.1
+  service:
+    port: 80
+    targetPort: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  livenessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  startupProbe:
+    enabled: true
+    failureThreshold: 3
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: "mks.manticoresearch.com"
+      paths: ["/"]
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+notifications:
+  telegram:
+    token: ""
+    chatId: ""
+
+podSecurityPolicy:
+  enabled: false
+  annotations: {}
+
+nameOverride: ""
+fullnameOverride: ""
+
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+#   cpu: 100m
+#   memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

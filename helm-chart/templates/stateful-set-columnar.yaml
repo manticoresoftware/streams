@@ -1,0 +1,88 @@
+{{- if .Values.columnar.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "manticore-streams.fullname" . }}-columnar
+  labels:
+    name: {{ include "manticore-streams.name" . }}-columnar
+    {{- include "manticore-streams.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name:  {{ include "manticore-streams.name" . }}-columnar
+  serviceName: {{ include "manticore-streams.fullname" . }}-columnar-service
+  template:
+    metadata:
+      labels:
+        name: {{ include "manticore-streams.name" . }}-columnar
+    spec:
+      serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
+      securityContext:
+        fsGroup: {{ .Values.columnar.userId }}
+        runAsGroup: {{ .Values.columnar.userId }}
+        runAsUser: {{ .Values.columnar.userId }}
+#        fsGroupChangePolicy: "Always"
+      containers:
+      - name: {{ .Chart.Name }}-columnar
+        image: {{ .Values.columnar.image.repository }}:{{ .Values.columnar.image.tag | default .Chart.AppVersion }}
+        imagePullPolicy: {{ .Values.columnar.image.imagePullPolicy }}
+        env:
+          - name: searchd_mysql_version_string
+            value: "5.5.21"
+          - name: searchd_binlog_path
+            value: ""
+          - name: searchd_max_packet_size
+            value: "128M"
+          - name: searchd_pid_file
+            value: /tmp/searchd.pid
+          - name: RUN_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: CLEANER_DELAY_SEC
+            value: {{ .Values.columnar.debug_cleaner_delay | quote }}
+        volumeMounts:
+        - name: storage
+          mountPath: /var/lib/manticore
+        readinessProbe:
+          {{- if .Values.columnar.readinessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.columnar.readinessProbe "enabled") "context" $) | nindent 8 }}
+          exec:
+            command:
+              - bash
+              - -c
+              - "mysql -e 'status' | grep Manticore"
+          {{- end }}
+        livenessProbe:
+          {{- if .Values.columnar.livenessProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.columnar.livenessProbe "enabled") "context" $) | nindent 8 }}
+          exec:
+            command:
+              - bash
+              - -c
+              - "mysql -e 'status' | grep Manticore"
+          {{- end }}
+        {{- if semverCompare ">=1.20-0" $.Capabilities.KubeVersion.GitVersion }}
+        startupProbe:
+          {{- if .Values.columnar.startupProbe.enabled }}
+          {{- include "manticore-streams.render" (dict "value" (omit .Values.columnar.startupProbe "enabled") "context" $) | nindent 8 }}
+          tcpSocket:
+            port: {{ .Values.columnar.service.sqlPort }}
+          {{- end }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.columnar.resources | nindent 10 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+  - metadata:
+      name: storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.columnar.volumeClaimTemplates.size | quote }}
+{{- end }}
