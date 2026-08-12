@@ -364,9 +364,17 @@ jobs:
           echo "Pipeline $pipeline did not produce offset $expected_offset within ${TIMEOUT_SECONDS}s" >&2
           kubectl -n "$APP_NAMESPACE" describe "statefulset/$pipeline" || true
           kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -30 || true
+          kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o wide || true
           for pod in $(kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o name); do
             kubectl -n "$APP_NAMESPACE" describe "$pod" || true
-            kubectl -n "$APP_NAMESPACE" logs "$pod" --all-containers --prefix || true
+            for container in $(kubectl -n "$APP_NAMESPACE" get "$pod" -o jsonpath='{.spec.containers[*].name}'); do
+              case "$container" in
+                *-manticore|*-worker)
+                  echo "--- Pipeline container logs: $pod ($container) ---"
+                  kubectl -n "$APP_NAMESPACE" logs "$pod" -c "$container" --prefix || true
+                  ;;
+              esac
+            done
           done
           exit 1
       - name: Collect diagnostics
