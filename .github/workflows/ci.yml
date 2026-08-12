@@ -29,7 +29,7 @@ jobs:
       - run: mvn test -DskipTests=false -Dmaven.test.skip=false
         working-directory: sources/src
 
-  image-smoke:
+  image-build:
     needs: worker-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -42,7 +42,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - run: docker build -t streams/${{ matrix.component }}:ci -f docker/${{ matrix.component }}/Dockerfile docker/${{ matrix.component }}
 
-  ui-image-smoke:
+  ui-image-build:
     needs: worker-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -56,7 +56,7 @@ jobs:
       - run: cp -a ui/. docker/${{ matrix.component }}/source/
       - run: docker build -t streams/${{ matrix.component }}:ci -f docker/${{ matrix.component }}/Dockerfile docker/${{ matrix.component }}
 
-  worker-image-smoke:
+  worker-image-build:
     needs: worker-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -82,7 +82,13 @@ jobs:
         run: |
           set -eux
           short_sha=$(git rev-parse --short HEAD)
-          sed -i "s/\$Format:%h\$/${short_sha}/g" helm-chart/Chart.yaml
+          chart=helm-chart/Chart.yaml
+          token="\$Format:%h\$"
+          source=$(<"$chart")
+          stripped=${source//"$token"/}
+          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
+          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
+          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
       - run: helm lint helm-chart
       - run: helm template manticore-streams helm-chart --kube-version v1.32.5 > rendered-default.yaml
       - run: docker run --rm -v "$PWD:/work" -w /work ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -kubernetes-version 1.32.5 rendered-default.yaml
@@ -106,9 +112,19 @@ jobs:
               - '.github/workflows/ci.yml'
 
   k8s-e2e:
-    needs: [worker-tests, image-smoke, ui-image-smoke, worker-image-smoke, helm, changes]
+    needs: [worker-tests, image-build, ui-image-build, worker-image-build, helm, changes]
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    env:
+      APP_NAMESPACE: manticore-streams
+      KAFKA_NAMESPACE: kafka
+      RELEASE_NAME: manticore-streams
+      KAFKA_RELEASE_NAME: my-kafka
+      TIMEOUT_SECONDS: 600
+      EXPECTED_RECORDS: 9418
+      KAFKA_POD: my-kafka-controller-0
+      UI_DEPLOYMENT: manticore-streams-manticoresearch-ui
+      UI_CONTAINER: manticoresearch-ui
     steps:
       - uses: actions/checkout@v4
       - name: Skip unrelated pull request
@@ -135,7 +151,13 @@ jobs:
         run: |
           set -eux
           short_sha=$(git rev-parse --short HEAD)
-          sed -i "s/\$Format:%h\$/${short_sha}/g" helm-chart/Chart.yaml
+          chart=helm-chart/Chart.yaml
+          token="\$Format:%h\$"
+          source=$(<"$chart")
+          stripped=${source//"$token"/}
+          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
+          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
+          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
       - name: Build local images
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
@@ -176,9 +198,65 @@ jobs:
           )
           helm template manticore-streams helm-chart --kube-version v1.32.5 "${ci_overrides[@]}" > artifacts-rendered-helm.yaml
           helm upgrade --install manticore-streams helm-chart --namespace manticore-streams --create-namespace --wait --timeout 600s "${ci_overrides[@]}"
-      - name: Run functional test
+      - name: Wait for application workloads
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: TIMEOUT_SECONDS=600 sh dev-environment/k8s_tests/test.sh
+        run: |
+          set -eux
+          kubectl get namespace "$APP_NAMESPACE"
+          kubectl -n "$KAFKA_NAMESPACE" get pod "$KAFKA_POD"
+          kubectl -n "$APP_NAMESPACE" rollout status deployment/"$UI_DEPLOYMENT" --timeout="${TIMEOUT_SECONDS}s"
+          kubectl -n "$APP_NAMESPACE" rollout status deployment/"${RELEASE_NAME}-manticoresearch-scaler" --timeout="${TIMEOUT_SECONDS}s"
+          kubectl -n "$APP_NAMESPACE" rollout status statefulset/"${RELEASE_NAME}-manticoresearch-columnar" --timeout="${TIMEOUT_SECONDS}s"
+          kubectl -n "$APP_NAMESPACE" rollout status statefulset/"${RELEASE_NAME}-manticoresearch-ui-mysql" --timeout="${TIMEOUT_SECONDS}s"
+          ui_pod=$(kubectl -n "$APP_NAMESPACE" get pods -l name=manticoresearch-ui -o jsonpath='{.items[0].metadata.name}')
+          test -n "$ui_pod"
+          echo "UI_POD=$ui_pod" >> "$GITHUB_ENV"
+      - name: Create Kafka test topics
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -eux
+          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-docs --partitions=1 --replication-factor=1
+          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-results --partitions=1 --replication-factor=1
+      - name: Configure Laravel cluster test environment
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'
+      - name: Migrate and seed Laravel test database
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed
+      - name: Run Laravel Unit and Feature tests
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/phpunit/phpunit --do-not-cache-result --testsuite Dev --stderr'
+      - name: Run Laravel cluster integration tests
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/phpunit/phpunit --do-not-cache-result --testsuite Cluster --stderr'
+      - name: Load Kafka test fixture
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -eux
+          kubectl cp dev-environment/kafka/test_data.tar.gz "$KAFKA_NAMESPACE/$KAFKA_POD:/tmp/test_data.tar.gz"
+          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
+          start_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic my-results' | awk -F: 'END { print $3 }')
+          echo "START_OFFSET=${start_offset:-0}" >> "$GITHUB_ENV"
+      - name: Publish Kafka test fixture
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-console-producer.sh --broker-list localhost:9092 --topic my-docs < /tmp/test_data.json'
+      - name: Verify Kafka processing result
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -eux
+          end=$(( $(date +%s) + TIMEOUT_SECONDS ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            current_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic my-results' | awk -F: 'END { print $3 }')
+            current_offset=${current_offset:-0}
+            if [ "$current_offset" -eq $((START_OFFSET + EXPECTED_RECORDS)) ]; then
+              printf 'Processed exactly %s records\n' "$EXPECTED_RECORDS"
+              exit 0
+            fi
+            printf 'Waiting for output records: start=%s current=%s expected=%s\n' "$START_OFFSET" "$current_offset" "$EXPECTED_RECORDS"
+            sleep 10
+          done
+          echo "output offset did not reach $((START_OFFSET + EXPECTED_RECORDS)) within ${TIMEOUT_SECONDS}s" >&2
+          exit 1
       - name: Collect diagnostics
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         run: sh dev-environment/k8s_tests/collect-diagnostics.sh artifacts/k8s
@@ -221,7 +299,13 @@ jobs:
         run: |
           set -eux
           short_sha=$(git rev-parse --short HEAD)
-          sed -i "s/\$Format:%h\$/${short_sha}/g" helm-chart/Chart.yaml
+          chart=helm-chart/Chart.yaml
+          token="\$Format:%h\$"
+          source=$(<"$chart")
+          stripped=${source//"$token"/}
+          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
+          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
+          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
           if [ "${{ matrix.component }}" = "worker" ]; then
             mvn clean compile assembly:single -f sources/src/pom.xml
             cp sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar docker/worker/KafkaHandler.jar
@@ -257,7 +341,13 @@ jobs:
         run: |
           set -eux
           short_sha=$(git rev-parse --short HEAD)
-          sed -i "s/\$Format:%h\$/${short_sha}/g" helm-chart/Chart.yaml
+          chart=helm-chart/Chart.yaml
+          token="\$Format:%h\$"
+          source=$(<"$chart")
+          stripped=${source//"$token"/}
+          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
+          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
+          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
           version=$(awk '/^version:/ { print $2; exit }' helm-chart/Chart.yaml)
           app_version=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
           test "$version" = "$app_version"
