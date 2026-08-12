@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -78,7 +78,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -149,12 +149,13 @@ jobs:
       KAFKA_POD: my-kafka-controller-0
       UI_DEPLOYMENT: manticore-streams-manticoresearch-ui
       UI_CONTAINER: manticoresearch-ui
+      KIND_CLUSTER_NAME: chart-testing
     steps:
       - uses: actions/checkout@v4
       - name: Skip unrelated pull request
         if: github.event_name == 'pull_request' && needs.changes.outputs.relevant != 'true'
         run: echo 'No Kubernetes-relevant files changed.'
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         with:
           distribution: temurin
@@ -170,6 +171,7 @@ jobs:
           version: v0.26.0
           node_image: kindest/node:v1.32.5
           config: dev-environment/k8s_tests/kind-config.yaml
+          cluster_name: chart-testing
       - name: Materialize development chart version
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
@@ -203,7 +205,7 @@ jobs:
             docker tag "streams/${component}:ci" "ghcr.io/manticoresoftware/streams/${component}:${tag}"
           done
           mapfile -t images < <(printf '%s\n' "${components[@]}" | sed "s#^#ghcr.io/manticoresoftware/streams/#; s#\$#:${tag}#")
-          kind load docker-image "${images[@]}"
+          kind load docker-image --name "$KIND_CLUSTER_NAME" "${images[@]}"
       - name: Install Kafka and chart
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
