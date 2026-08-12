@@ -239,7 +239,23 @@ jobs:
             --set-string "rulesChecker.image.tag=${tag}"
           )
           helm template manticore-streams helm-chart --kube-version v1.32.5 "${ci_overrides[@]}" > artifacts-rendered-helm.yaml
-          helm upgrade --install manticore-streams helm-chart --namespace manticore-streams --create-namespace --wait --timeout 600s "${ci_overrides[@]}"
+          mkdir -p artifacts
+          helm upgrade --install manticore-streams helm-chart --namespace manticore-streams --create-namespace --wait --timeout 600s "${ci_overrides[@]}" > artifacts/helm-upgrade.log 2>&1 &
+          helm_pid=$!
+          while kill -0 "$helm_pid" 2>/dev/null; do
+            echo '--- waiting for Helm deployment ---'
+            kubectl -n "$APP_NAMESPACE" get pods,jobs -o wide || true
+            kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -20 || true
+            tail -20 artifacts/helm-upgrade.log || true
+            sleep 10
+          done
+          if wait "$helm_pid"; then
+            cat artifacts/helm-upgrade.log
+          else
+            status=$?
+            cat artifacts/helm-upgrade.log
+            exit "$status"
+          fi
       - name: Wait for application workloads
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
