@@ -267,18 +267,18 @@ jobs:
           set -eux
           kubectl cp dev-environment/kafka/test_data.tar.gz "$KAFKA_NAMESPACE/$KAFKA_POD:/tmp/test_data.tar.gz"
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
-          start_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic my-results' | awk -F: 'END { print $3 }')
+          start_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-results | awk -F: 'END { print $3 }')
           echo "START_OFFSET=${start_offset:-0}" >> "$GITHUB_ENV"
       - name: Publish Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-console-producer.sh --broker-list localhost:9092 --topic my-docs < /tmp/test_data.json'
+        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic my-docs < /tmp/test_data.json'
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
           set -eux
           end=$(( $(date +%s) + TIMEOUT_SECONDS ))
           while [ "$(date +%s)" -lt "$end" ]; do
-            current_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic my-results' | awk -F: 'END { print $3 }')
+            current_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-results | awk -F: 'END { print $3 }')
             current_offset=${current_offset:-0}
             if [ "$current_offset" -eq $((START_OFFSET + EXPECTED_RECORDS)) ]; then
               printf 'Processed exactly %s records\n' "$EXPECTED_RECORDS"
