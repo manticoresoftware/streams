@@ -8,3 +8,4 @@
 /docker/worker/KafkaHandler.jar
 /docker/ui/source/
 /docker/ui-nginx/source/
+/artifacts/
