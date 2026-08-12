@@ -56,7 +56,7 @@ For installing you must specify auth l/p and ingress host of you project
 --set ui.admin.email="user@manticoresearch.com" 
 --set ui.admin.pass="myNewPassword"
 --set ingress.hosts[0].host="kafka.manticoresearch.com" 
---set ingress.hosts[0].paths[0]="/" ./helm-chart`
+--set ingress.hosts[0].paths[0]="/" ./manticoresearch-{version}.tgz`
 
 **Helm 3**
 
@@ -64,19 +64,19 @@ For installing you must specify auth l/p and ingress host of you project
 --set ui.admin.email="user@manticoresearch.com" 
 --set ui.admin.pass="myNewPassword"
 --set ingress.hosts[0].host="kafka.manticoresearch.com" 
---set ingress.hosts[0].paths[0]="/" ./helm-chart`
+--set ingress.hosts[0].paths[0]="/" ./manticoresearch-{version}.tgz`
 
 
 
-Or if you've udpated `values.yaml` you can use just
+The release package uses the `values.yaml` embedded when it was built. To use your own edited values file, pass it explicitly with `-f values.yaml`:
 
 For **Helm 2**
  
-`helm install --name {name} --namespace {namesace} ./helm-chart`
+`helm install --name {name} --namespace {namespace} -f values.yaml ./manticoresearch-{version}.tgz`
 
 For **Helm 3**
 
-`helm install {name} --namespace {namesace} ./helm-chart`
+`helm install {name} --namespace {namespace} -f values.yaml ./manticoresearch-{version}.tgz`
 
 Important parameters there:
 

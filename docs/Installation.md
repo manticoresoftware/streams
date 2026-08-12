@@ -9,9 +9,7 @@ this [article](InstallFromScratch/Kafka.md) about installation of Apache Kafka
 
 ### ⚠️ Attention! ⚠️
 
-You can't use **GIT clone**. You must always **download archive** from git.
-
-Helm use commit tags which don't available via git clone!!
+You can't use **GIT clone**. Download the `.tgz` chart asset from the GitHub Release for the desired version instead. The release package has matching chart and image versions already materialized.
 
 ## Container images
 
@@ -39,11 +37,11 @@ Important parameters there:
 <!-- request Helm 3 -->
 
 ```
-helm install {name} --namespace {namesace} \
+helm install {name} --namespace {namespace} \
 --set ui.admin.email="user@manticoresearch.com" \
 --set ui.admin.pass="myNewPassword" \
 --set ingress.hosts[0].host="kafka.manticoresearch.com" \
---set ingress.hosts[0].paths[0]="/" ./helm-chart
+--set ingress.hosts[0].paths[0]="/" ./manticoresearch-{version}.tgz
 ```
 
 <!-- intro -->
@@ -53,16 +51,16 @@ helm install {name} --namespace {namesace} \
 <!-- request Helm 2 -->
 
 ```
-helm install --name {name} --namespace {namesace} \
+helm install --name {name} --namespace {namespace} \
 --set ui.admin.email="user@manticoresearch.com" \
 --set ui.admin.pass="myNewPassword" \
 --set ingress.hosts[0].host="kafka.manticoresearch.com" \
---set ingress.hosts[0].paths[0]="/" ./helm-chart
+--set ingress.hosts[0].paths[0]="/" ./manticoresearch-{version}.tgz
 ```
 
 <!-- end -->
 <!-- example helm-filled-install -->
-Or if you've udpated `values.yaml` you can use just:
+The release package uses the `values.yaml` embedded when it was built. To use your own edited values file, pass it explicitly with `-f values.yaml`:
 
 <!-- intro -->
 
@@ -70,7 +68,7 @@ Or if you've udpated `values.yaml` you can use just:
 
 <!-- request Helm 3 -->
 
-```helm install {name} --namespace {namesace} ./helm-chart```
+```helm install {name} --namespace {namespace} -f values.yaml ./manticoresearch-{version}.tgz```
 
 <!-- intro -->
 
@@ -78,7 +76,7 @@ Or if you've udpated `values.yaml` you can use just:
 
 <!-- request Helm 2 -->
 
-```helm install --name {name} --namespace {namesace} ./helm-chart```
+```helm install --name {name} --namespace {namespace} -f values.yaml ./manticoresearch-{version}.tgz```
 
 <!-- end -->
 
