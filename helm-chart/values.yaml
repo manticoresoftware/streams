@@ -113,11 +113,13 @@ ui:
               location /nginx_status {
                  stub_status;
                  allow 127.0.0.1;
+                 allow ::1;
                  deny all;
               }
               location ~ ^/(status|ping)$ {
                   include fastcgi_params;
                   allow 127.0.0.1;
+                  allow ::1;
                   fastcgi_param REQUEST_METHOD $request_method;
                   fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
                   fastcgi_pass 127.0.0.1:9000;
