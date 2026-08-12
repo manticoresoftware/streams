@@ -144,12 +144,13 @@ jobs:
       KAFKA_NAMESPACE: kafka
       RELEASE_NAME: manticore-streams
       KAFKA_RELEASE_NAME: my-kafka
+      KAFKA_FIXTURE_PRODUCER_POD: kafka-fixture-producer
       TIMEOUT_SECONDS: 600
       EXPECTED_RECORDS: 9418
       KAFKA_POD: my-kafka-controller-0
       UI_DEPLOYMENT: manticore-streams-manticoresearch-ui
       UI_CONTAINER: manticoresearch-ui
-      KIND_CLUSTER_NAME: chart-testing
+      K3S_VERSION: v1.32.5+k3s1
     steps:
       - uses: actions/checkout@v4
       - name: Skip unrelated pull request
@@ -165,13 +166,14 @@ jobs:
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
       - uses: azure/setup-kubectl@v4
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-      - uses: helm/kind-action@v1.12.0
+      - name: Install K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        with:
-          version: v0.27.0
-          node_image: kindest/node:v1.32.5
-          config: dev-environment/k8s_tests/kind-config.yaml
-          cluster_name: chart-testing
+        run: |
+          set -eux
+          curl -fsSL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server --disable=traefik --disable=servicelb
+          sudo chmod 644 /etc/rancher/k3s/k3s.yaml
+          echo 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> "$GITHUB_ENV"
+          sudo k3s kubectl wait --for=condition=Ready node --all --timeout="${TIMEOUT_SECONDS}s"
       - name: Materialize development chart version
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
@@ -191,7 +193,7 @@ jobs:
           pattern: ci-image-*
           path: ci-images
           merge-multiple: true
-      - name: Load validated images into kind
+      - name: Import validated images into K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
           set -eux
@@ -204,8 +206,11 @@ jobs:
             docker image inspect "streams/${component}:ci" >/dev/null
             docker tag "streams/${component}:ci" "ghcr.io/manticoresoftware/streams/${component}:${tag}"
           done
-          mapfile -t images < <(printf '%s\n' "${components[@]}" | sed "s#^#ghcr.io/manticoresoftware/streams/#; s#\$#:${tag}#")
-          kind load docker-image --name "$KIND_CLUSTER_NAME" "${images[@]}"
+          for component in "${components[@]}"; do
+            image="ghcr.io/manticoresoftware/streams/${component}:${tag}"
+            docker image save "$image" | sudo k3s ctr -n k8s.io images import -
+            sudo k3s ctr -n k8s.io images list -q | grep -Fx "$image"
+          done
       - name: Install Kafka and chart
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
@@ -265,13 +270,39 @@ jobs:
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
           set -eux
-          kubectl cp dev-environment/kafka/test_data.tar.gz "$KAFKA_NAMESPACE/$KAFKA_POD:/tmp/test_data.tar.gz"
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
           start_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-results | awk -F: 'END { print $3 }')
           echo "START_OFFSET=${start_offset:-0}" >> "$GITHUB_ENV"
+      - name: Start Kafka fixture producer
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -eux
+          kubectl -n "$KAFKA_NAMESPACE" apply -f - <<EOF
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: ${KAFKA_FIXTURE_PRODUCER_POD}
+            labels:
+              app.kubernetes.io/name: kafka-fixture-producer
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: producer
+                image: docker.io/bitnamilegacy/kafka:4.0.0-debian-12-r10
+                command: ["sh", "-c", "sleep infinity"]
+                resources:
+                  requests:
+                    cpu: 250m
+                    memory: 512Mi
+                  limits:
+                    cpu: "1"
+                    memory: 1Gi
+          EOF
+          kubectl -n "$KAFKA_NAMESPACE" wait --for=condition=Ready "pod/${KAFKA_FIXTURE_PRODUCER_POD}" --timeout="${TIMEOUT_SECONDS}s"
+          kubectl -n "$KAFKA_NAMESPACE" cp dev-environment/kafka/test_data.tar.gz "${KAFKA_FIXTURE_PRODUCER_POD}:/tmp/test_data.tar.gz"
+          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
       - name: Publish Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic my-docs < /tmp/test_data.json'
+        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-console-producer.sh --bootstrap-server my-kafka.kafka.svc.cluster.local:9092 --topic my-docs < /tmp/test_data.json'
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
