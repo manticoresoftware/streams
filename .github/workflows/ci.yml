@@ -294,15 +294,15 @@ jobs:
           set -eux
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-docs --partitions=1 --replication-factor=1
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-results --partitions=1 --replication-factor=1
-      - name: Configure Laravel cluster test environment
-        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'
       - name: Migrate and seed Laravel test database
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed
       - name: Run Laravel Unit and Feature tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr'
+      - name: Configure Laravel cluster test environment
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'
       - name: Run Laravel cluster integration tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
