@@ -244,7 +244,7 @@ jobs:
           helm_pid=$!
           next_report=0
           while kill -0 "$helm_pid" 2>/dev/null; do
-            failed_jobs=$(kubectl -n "$APP_NAMESPACE" get jobs --no-headers -o custom-columns=NAME:.metadata.name,FAILED:.status.failed 2>/dev/null | awk '$2 != "" && $2 != "0" { print $1 }' || true)
+            failed_jobs=$(kubectl -n "$APP_NAMESPACE" get jobs -o jsonpath='{range .items[?(@.status.conditions)]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="Failed")]}{.status}{end}{"\n"}{end}' 2>/dev/null | awk '$2 == "True" { print $1 }' || true)
             if [ -n "$failed_jobs" ]; then
               echo "Helm deployment has failed Job(s): $failed_jobs" >&2
               for job in $failed_jobs; do
