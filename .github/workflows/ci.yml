@@ -294,12 +294,21 @@ jobs:
           set -eux
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-docs --partitions=1 --replication-factor=1
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-results --partitions=1 --replication-factor=1
+      - name: Install Laravel Dev test Manticore
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -eux
+          tag=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
+          APP_NAMESPACE="$APP_NAMESPACE" \
+          DEV_TEST_MANTICORE_IMAGE="ghcr.io/manticoresoftware/streams/manticore:${tag}" \
+          TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
+          sh dev-environment/k8s_tests/install-dev-test-manticore.sh
       - name: Migrate and seed Laravel test database
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
       - name: Run Laravel Unit and Feature tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- env MANTICORE_HOST=manticore-dev-tests MANTICORE_PORT=9306 COLUMNAR_HOST="${RELEASE_NAME}-manticoresearch-columnar-service.${APP_NAMESPACE}.svc.cluster.local" COLUMNAR_PORT=9306 php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr
       - name: Configure Laravel cluster test environment
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'

@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'host' => (in_array(config('app.env'), ['production', 'cluster_testing']) ) ?
+    'host' => getenv('COLUMNAR_HOST') ?
         getenv('COLUMNAR_HOST').':'.getenv('COLUMNAR_PORT')
         : 'columnar:9306',
     'index' => 'metrics'
