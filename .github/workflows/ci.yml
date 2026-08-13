@@ -305,6 +305,24 @@ jobs:
       - name: Run Laravel cluster integration tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/phpunit/phpunit --do-not-cache-result --testsuite Cluster --stderr'
+      - name: Wait for generated pipeline
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -eu
+          end=$(( $(date +%s) + TIMEOUT_SECONDS ))
+          pipeline=''
+          while [ "$(date +%s)" -lt "$end" ]; do
+            pipeline=$(kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker -o jsonpath='{range .items[*]}{.metadata.name}{end}')
+            [ -n "$pipeline" ] && break
+            echo 'Waiting for the cluster test to create a pipeline StatefulSet'
+            sleep 5
+          done
+          [ -n "$pipeline" ] || { echo "Cluster test did not create a pipeline StatefulSet within ${TIMEOUT_SECONDS}s" >&2; kubectl -n "$APP_NAMESPACE" get pods,deployments,statefulsets,jobs -o wide || true; exit 1; }
+          echo "Pipeline StatefulSet: $pipeline"
+          kubectl -n "$APP_NAMESPACE" rollout status "statefulset/$pipeline" --timeout="${TIMEOUT_SECONDS}s"
+          kubectl -n "$APP_NAMESPACE" get statefulset "$pipeline"
+          kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o wide
+          echo "PIPELINE=$pipeline" >> "$GITHUB_ENV"
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
@@ -347,20 +365,6 @@ jobs:
         run: |
           set -eu
           end=$(( $(date +%s) + TIMEOUT_SECONDS ))
-          pipeline=''
-          while [ "$(date +%s)" -lt "$end" ]; do
-            pipeline=$(kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker -o jsonpath='{range .items[*]}{.metadata.name}{end}')
-            [ -n "$pipeline" ] && break
-            echo 'Waiting for the cluster test to create a pipeline StatefulSet'
-            sleep 5
-          done
-          [ -n "$pipeline" ] || { echo "Cluster test did not create a pipeline StatefulSet within ${TIMEOUT_SECONDS}s" >&2; exit 1; }
-
-          echo "Pipeline StatefulSet: $pipeline"
-          kubectl -n "$APP_NAMESPACE" rollout status "statefulset/$pipeline" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" get statefulset "$pipeline"
-          kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o wide
-
           expected_offset=$((START_OFFSET + EXPECTED_RECORDS))
           next_report=0
           while [ "$(date +%s)" -lt "$end" ]; do
@@ -373,17 +377,17 @@ jobs:
             now=$(date +%s)
             if [ "$now" -ge "$next_report" ]; then
               printf 'Kafka output: start=%s current=%s expected=%s\n' "$START_OFFSET" "$current_offset" "$expected_offset"
-              kubectl -n "$APP_NAMESPACE" get statefulset "$pipeline"
-              kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o wide
+              kubectl -n "$APP_NAMESPACE" get statefulset "$PIPELINE"
+              kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${PIPELINE#${RELEASE_NAME}-}" -o wide
               next_report=$((now + 30))
             fi
             sleep 10
           done
-          echo "Pipeline $pipeline did not produce offset $expected_offset within ${TIMEOUT_SECONDS}s" >&2
-          kubectl -n "$APP_NAMESPACE" describe "statefulset/$pipeline" || true
+          echo "Pipeline $PIPELINE did not produce offset $expected_offset within ${TIMEOUT_SECONDS}s" >&2
+          kubectl -n "$APP_NAMESPACE" describe "statefulset/$PIPELINE" || true
           kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -30 || true
-          kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o wide || true
-          for pod in $(kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o name); do
+          kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${PIPELINE#${RELEASE_NAME}-}" -o wide || true
+          for pod in $(kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${PIPELINE#${RELEASE_NAME}-}" -o name); do
             kubectl -n "$APP_NAMESPACE" describe "$pod" || true
             for container in $(kubectl -n "$APP_NAMESPACE" get "$pod" -o jsonpath='{.spec.containers[*].name}'); do
               case "$container" in
