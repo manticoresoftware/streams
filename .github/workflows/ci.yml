@@ -296,7 +296,7 @@ jobs:
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-results --partitions=1 --replication-factor=1
       - name: Migrate and seed Laravel test database
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
       - name: Run Laravel Unit and Feature tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr'
