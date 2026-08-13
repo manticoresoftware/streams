@@ -349,7 +349,7 @@ jobs:
           end=$(( $(date +%s) + TIMEOUT_SECONDS ))
           pipeline=''
           while [ "$(date +%s)" -lt "$end" ]; do
-            pipeline=$(kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}')
+            pipeline=$(kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker -o jsonpath='{range .items[*]}{.metadata.name}{end}')
             [ -n "$pipeline" ] && break
             echo 'Waiting for the cluster test to create a pipeline StatefulSet'
             sleep 5
