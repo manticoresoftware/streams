@@ -146,6 +146,7 @@ jobs:
       KAFKA_RELEASE_NAME: my-kafka
       KAFKA_FIXTURE_PRODUCER_POD: kafka-fixture-producer
       TIMEOUT_SECONDS: 600
+      PIPELINE_CREATION_TIMEOUT_SECONDS: 60
       EXPECTED_RECORDS: 9418
       KAFKA_POD: my-kafka-controller-0
       UI_DEPLOYMENT: manticore-streams-manticoresearch-ui
@@ -301,36 +302,51 @@ jobs:
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed
       - name: Run Laravel Unit and Feature tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/phpunit/phpunit --do-not-cache-result --testsuite Dev --stderr'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr'
       - name: Run Laravel cluster integration tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/phpunit/phpunit --do-not-cache-result --testsuite Cluster --stderr'
+        run: |
+          set -eu
+          kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c '
+            test -x ./vendor/bin/phpunit
+            php -d short_open_tag=off ./vendor/bin/phpunit --testsuite Cluster --list-tests --stderr | tee /tmp/cluster-test-list.txt
+            grep -Fqx " - Tests\\Cluster\\ClusterTest::assignUser" /tmp/cluster-test-list.txt
+            php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Cluster --stderr
+          '
       - name: Wait for generated pipeline
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
           set -eu
-          end=$(( $(date +%s) + TIMEOUT_SECONDS ))
+          started=$(date +%s)
+          end=$(( $(date +%s) + PIPELINE_CREATION_TIMEOUT_SECONDS ))
+          next_report=$started
           pipeline=''
           while [ "$(date +%s)" -lt "$end" ]; do
             pipeline=$(kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker -o jsonpath='{range .items[*]}{.metadata.name}{end}')
             [ -n "$pipeline" ] && break
-            echo 'Waiting for the cluster test to create a pipeline StatefulSet'
+            now=$(date +%s)
+            if [ "$now" -ge "$next_report" ]; then
+              printf 'Pipeline creation: waiting (%ss elapsed, %ss remaining)\n' "$((now - started))" "$((end - now))"
+              kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker
+              next_report=$((now + 30))
+            fi
             sleep 5
           done
           if [ -z "$pipeline" ]; then
-            echo "Cluster test did not create a pipeline StatefulSet within ${TIMEOUT_SECONDS}s" >&2
-            echo '--- Application resources after Cluster PHPUnit ---' >&2
-            kubectl -n "$APP_NAMESPACE" get all,configmaps,pvc -o wide || true
-            echo '--- UI service account permissions ---' >&2
+            echo "Pipeline creation: no StatefulSet after ${PIPELINE_CREATION_TIMEOUT_SECONDS}s" >&2
+            echo '--- Pipeline failure summary ---' >&2
+            kubectl -n "$APP_NAMESPACE" get pods,statefulsets,jobs -o wide || true
+            kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -20 || true
+            echo '--- UI service account permissions (statefulsets/services/PVCs) ---' >&2
             kubectl auth can-i create statefulsets.apps --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
             kubectl auth can-i create services --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
             kubectl auth can-i create persistentvolumeclaims --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
-            echo '--- UI container logs ---' >&2
-            kubectl -n "$APP_NAMESPACE" logs "$UI_POD" -c "$UI_CONTAINER" --tail=300 --prefix || true
-            kubectl -n "$APP_NAMESPACE" logs "$UI_POD" -c manticoresearch-nginx --tail=100 --prefix || true
+            echo '--- UI PHP logs (last 100 lines) ---' >&2
+            kubectl -n "$APP_NAMESPACE" logs "$UI_POD" -c "$UI_CONTAINER" --tail=100 --prefix || true
+            echo 'Detailed pod logs and full resources are in the k8s-e2e-diagnostics artifact.' >&2
             exit 1
           fi
-          echo "Pipeline StatefulSet: $pipeline"
+          printf 'Pipeline creation: found %s after %ss\n' "$pipeline" "$(( $(date +%s) - started ))"
           kubectl -n "$APP_NAMESPACE" rollout status "statefulset/$pipeline" --timeout="${TIMEOUT_SECONDS}s"
           kubectl -n "$APP_NAMESPACE" get statefulset "$pipeline"
           kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o wide
@@ -371,7 +387,7 @@ jobs:
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
       - name: Publish Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-console-producer.sh --bootstrap-server my-kafka.kafka.svc.cluster.local:9092 --topic my-docs < /tmp/test_data.json'
+        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- sh -c 'timeout 120s /opt/bitnami/kafka/bin/kafka-console-producer.sh --bootstrap-server my-kafka.kafka.svc.cluster.local:9092 --topic my-docs < /tmp/test_data.json'
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
