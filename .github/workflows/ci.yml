@@ -317,7 +317,19 @@ jobs:
             echo 'Waiting for the cluster test to create a pipeline StatefulSet'
             sleep 5
           done
-          [ -n "$pipeline" ] || { echo "Cluster test did not create a pipeline StatefulSet within ${TIMEOUT_SECONDS}s" >&2; kubectl -n "$APP_NAMESPACE" get pods,deployments,statefulsets,jobs -o wide || true; exit 1; }
+          if [ -z "$pipeline" ]; then
+            echo "Cluster test did not create a pipeline StatefulSet within ${TIMEOUT_SECONDS}s" >&2
+            echo '--- Application resources after Cluster PHPUnit ---' >&2
+            kubectl -n "$APP_NAMESPACE" get all,configmaps,pvc -o wide || true
+            echo '--- UI service account permissions ---' >&2
+            kubectl auth can-i create statefulsets.apps --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
+            kubectl auth can-i create services --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
+            kubectl auth can-i create persistentvolumeclaims --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
+            echo '--- UI container logs ---' >&2
+            kubectl -n "$APP_NAMESPACE" logs "$UI_POD" -c "$UI_CONTAINER" --tail=300 --prefix || true
+            kubectl -n "$APP_NAMESPACE" logs "$UI_POD" -c manticoresearch-nginx --tail=100 --prefix || true
+            exit 1
+          fi
           echo "Pipeline StatefulSet: $pipeline"
           kubectl -n "$APP_NAMESPACE" rollout status "statefulset/$pipeline" --timeout="${TIMEOUT_SECONDS}s"
           kubectl -n "$APP_NAMESPACE" get statefulset "$pipeline"
