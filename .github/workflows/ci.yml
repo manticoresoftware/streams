@@ -135,8 +135,54 @@ jobs:
               - 'dev-environment/k8s_tests/**'
               - '.github/workflows/ci.yml'
 
+  laravel-tests:
+    needs: [image-build, ui-image-build, changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Laravel test images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-image-*
+          path: ci-images
+          merge-multiple: true
+      - name: Load Laravel test images
+        run: |
+          set -eux
+          for component in manticore ui; do
+            gzip -dc "ci-images/${component}.tar.gz" | docker load
+            docker image inspect "streams/${component}:ci" >/dev/null
+          done
+      - name: Start Laravel test dependencies
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml up -d --wait mysql manticore columnar
+      - name: Wait for Laravel database connection
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml run --rm --no-deps ui php -r 'for ($attempt = 0; $attempt < 60; $attempt++) { try { new PDO("mysql:host=mysql;dbname=mysql", "root", "mysql"); exit(0); } catch (Throwable $exception) { sleep(1); } } fwrite(STDERR, "MySQL did not accept a Laravel connection within 60 seconds\n"); exit(1);'
+      - name: Initialize Laravel test Manticore schema
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml exec -T manticore php /etc/manticoresearch/alter.php --table=pq --batch=500
+      - name: Initialize Laravel test metrics storage
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml exec -T columnar mysql -h 127.0.0.1 -P 9306 -e 'CREATE TABLE IF NOT EXISTS metrics (scrapTime timestamp, metric_name text, value float, tag string)'
+      - name: Migrate and seed Laravel test database
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml run --rm --no-deps ui php artisan migrate:fresh --seed --force
+      - name: Run Laravel Unit and Feature tests
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml run --rm --no-deps ui php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr
+      - name: Collect Laravel test dependency logs
+        if: always()
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml logs --no-color > laravel-test-dependencies.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: laravel-test-dependencies
+          path: laravel-test-dependencies.log
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Remove Laravel test dependencies
+        if: always()
+        run: docker compose -f dev-environment/docker-compose.laravel-tests.yml down --volumes --remove-orphans
+
   k8s-e2e:
-    needs: [worker-tests, image-build, ui-image-build, worker-image-build, helm, changes]
+    needs: [worker-tests, image-build, ui-image-build, worker-image-build, helm, changes, laravel-tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
@@ -294,21 +340,9 @@ jobs:
           set -eux
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-docs --partitions=1 --replication-factor=1
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-results --partitions=1 --replication-factor=1
-      - name: Install Laravel Dev test Manticore
-        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          tag=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
-          APP_NAMESPACE="$APP_NAMESPACE" \
-          DEV_TEST_MANTICORE_IMAGE="ghcr.io/manticoresoftware/streams/manticore:${tag}" \
-          TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
-          sh dev-environment/k8s_tests/install-dev-test-manticore.sh
-      - name: Migrate and seed Laravel test database
+      - name: Migrate and seed Laravel cluster test database
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
-      - name: Run Laravel Unit and Feature tests
-        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- env MANTICORE_HOST=manticore-dev-tests MANTICORE_PORT=9306 COLUMNAR_HOST="${RELEASE_NAME}-manticoresearch-columnar-service.${APP_NAMESPACE}.svc.cluster.local" COLUMNAR_PORT=9306 php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr
       - name: Configure Laravel cluster test environment
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'
