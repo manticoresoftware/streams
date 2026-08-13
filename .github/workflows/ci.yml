@@ -132,6 +132,7 @@ jobs:
               - 'ui/**'
               - 'sources/**'
               - 'helm-chart/**'
+              - 'dev-environment/docker-compose.laravel-tests.yml'
               - 'dev-environment/k8s_tests/**'
               - '.github/workflows/ci.yml'
 

@@ -1,0 +1,66 @@
+name: manticore-streams-laravel-tests
+
+services:
+  mysql:
+    image: mysql:5.7.22
+    platform: linux/amd64
+    environment:
+      MYSQL_DATABASE: mysql
+      MYSQL_ROOT_PASSWORD: mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -pmysql --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  manticore:
+    image: streams/manticore:ci
+    platform: linux/amd64
+    environment:
+      MANTICORE_RULES: json=json|url=url|text=source|text=text|text=title|text=statustext|url=merged|url=merged2
+      MANTICORE_PORT: "9306"
+      PIPELINE: m
+      INSTANCE_LABEL: laravel-tests
+      STAGE: dev
+      BLACKLIST_MODE: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 9306 -e 'SELECT * FROM m_cluster:pq LIMIT 0'"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  columnar:
+    image: manticoresearch/manticore:25.0.0
+    platform: linux/amd64
+    environment:
+      EXTRA: "1"
+      searchd_mysql_version_string: "5.5.21"
+      searchd_max_packet_size: "128M"
+      searchd_pid_file: /tmp/searchd.pid
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 9306 -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  ui:
+    image: streams/ui:ci
+    platform: linux/amd64
+    environment:
+      DB_HOST: mysql
+      DB_DATABASE: mysql
+      DB_USERNAME: root
+      DB_PASSWORD: mysql
+      MANTICORE_HOST: manticore
+      MANTICORE_PORT: "9306"
+      COLUMNAR_HOST: columnar
+      COLUMNAR_PORT: "9306"
+    extra_hosts:
+      - "dev.manticoresearch.com=127.0.0.1"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      manticore:
+        condition: service_healthy
+      columnar:
+        condition: service_healthy
