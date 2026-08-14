@@ -38,7 +38,19 @@ helm upgrade --install "$KAFKA_RELEASE_NAME" bitnami/kafka \
   --set listeners.client.protocol=PLAINTEXT \
   --set listeners.controller.protocol=PLAINTEXT \
   --set listeners.interbroker.protocol=PLAINTEXT \
+  --set config.offsets\\.topic\\.replication\\.factor=1 \
+  --set config.transaction\\.state\\.log\\.replication\\.factor=1 \
+  --set config.transaction\\.state\\.log\\.min\\.isr=1 \
   --set provisioning.enabled=false \
   --wait --timeout "${TIMEOUT_SECONDS}s"
 
 kubectl -n "$KAFKA_NAMESPACE" rollout status statefulset/"${KAFKA_RELEASE_NAME}"-controller --timeout="${TIMEOUT_SECONDS}s"
+kubectl -n "$KAFKA_NAMESPACE" exec "${KAFKA_RELEASE_NAME}"-controller-0 -c kafka -- \
+  /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists \
+  --topic ci-kafka-coordinator-readiness --partitions=1 --replication-factor=1
+kubectl -n "$KAFKA_NAMESPACE" exec "${KAFKA_RELEASE_NAME}"-controller-0 -c kafka -- sh -c \
+  "printf 'ready\\n' | /opt/bitnami/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic ci-kafka-coordinator-readiness"
+timeout 60s kubectl -n "$KAFKA_NAMESPACE" exec "${KAFKA_RELEASE_NAME}"-controller-0 -c kafka -- \
+  /opt/bitnami/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic ci-kafka-coordinator-readiness --group ci-kafka-coordinator-readiness --from-beginning \
+  --max-messages 1 --timeout-ms 30000 >/dev/null
