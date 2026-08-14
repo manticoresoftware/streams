@@ -401,7 +401,7 @@ jobs:
           kubectl -n "$KAFKA_NAMESPACE" wait --for=condition=Ready "pod/${KAFKA_FIXTURE_PRODUCER_POD}" --timeout="${TIMEOUT_SECONDS}s"
           kubectl -n "$KAFKA_NAMESPACE" cp dev-environment/kafka/test_data.tar.gz "${KAFKA_FIXTURE_PRODUCER_POD}:/tmp/test_data.tar.gz"
           kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
-          fixture_records=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- wc -l < /tmp/test_data.json)
+          fixture_records=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- sh -c 'wc -l < /tmp/test_data.json')
           echo "FIXTURE_RECORDS=${fixture_records}" >> "$GITHUB_ENV"
       - name: Publish Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
