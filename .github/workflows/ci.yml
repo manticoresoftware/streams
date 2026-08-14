@@ -363,7 +363,7 @@ jobs:
           printf 'Pipeline creation: found %s after %ss\n' "$pipeline" "$(( $(date +%s) - started ))"
           kubectl -n "$APP_NAMESPACE" rollout status "statefulset/$pipeline" --timeout="${TIMEOUT_SECONDS}s"
           kubectl -n "$APP_NAMESPACE" get statefulset "$pipeline"
-          kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${pipeline#${RELEASE_NAME}-}" -o wide
+          kubectl -n "$APP_NAMESPACE" get pods -l "name=${pipeline#${RELEASE_NAME}-}" -o wide
           echo "PIPELINE=$pipeline" >> "$GITHUB_ENV"
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
@@ -420,7 +420,7 @@ jobs:
             if [ "$now" -ge "$next_report" ]; then
               printf 'Kafka output: start=%s current=%s expected=%s\n' "$START_OFFSET" "$current_offset" "$expected_offset"
               kubectl -n "$APP_NAMESPACE" get statefulset "$PIPELINE"
-              kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${PIPELINE#${RELEASE_NAME}-}" -o wide
+              kubectl -n "$APP_NAMESPACE" get pods -l "name=${PIPELINE#${RELEASE_NAME}-}" -o wide
               next_report=$((now + 30))
             fi
             sleep 10
@@ -428,14 +428,16 @@ jobs:
           echo "Pipeline $PIPELINE did not produce offset $expected_offset within ${TIMEOUT_SECONDS}s" >&2
           kubectl -n "$APP_NAMESPACE" describe "statefulset/$PIPELINE" || true
           kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -30 || true
-          kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${PIPELINE#${RELEASE_NAME}-}" -o wide || true
-          for pod in $(kubectl -n "$APP_NAMESPACE" get pods -l "app.kubernetes.io/pipeline=${PIPELINE#${RELEASE_NAME}-}" -o name); do
+          kubectl -n "$APP_NAMESPACE" get pods -l "name=${PIPELINE#${RELEASE_NAME}-}" -o wide || true
+          for pod in $(kubectl -n "$APP_NAMESPACE" get pods -l "name=${PIPELINE#${RELEASE_NAME}-}" -o name); do
             kubectl -n "$APP_NAMESPACE" describe "$pod" || true
             for container in $(kubectl -n "$APP_NAMESPACE" get "$pod" -o jsonpath='{.spec.containers[*].name}'); do
               case "$container" in
                 *-manticore|*-worker)
                   echo "--- Pipeline container logs: $pod ($container) ---"
                   kubectl -n "$APP_NAMESPACE" logs "$pod" -c "$container" --prefix || true
+                  echo "--- Previous pipeline container logs: $pod ($container) ---"
+                  kubectl -n "$APP_NAMESPACE" logs "$pod" -c "$container" --previous --prefix || true
                   ;;
               esac
             done
