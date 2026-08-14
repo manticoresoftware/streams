@@ -38,9 +38,9 @@ helm upgrade --install "$KAFKA_RELEASE_NAME" bitnami/kafka \
   --set listeners.client.protocol=PLAINTEXT \
   --set listeners.controller.protocol=PLAINTEXT \
   --set listeners.interbroker.protocol=PLAINTEXT \
-  --set config.offsets\\.topic\\.replication\\.factor=1 \
-  --set config.transaction\\.state\\.log\\.replication\\.factor=1 \
-  --set config.transaction\\.state\\.log\\.min\\.isr=1 \
+  --set overrideConfiguration.offsets\\.topic\\.replication\\.factor=1 \
+  --set overrideConfiguration.transaction\\.state\\.log\\.replication\\.factor=1 \
+  --set overrideConfiguration.transaction\\.state\\.log\\.min\\.isr=1 \
   --set provisioning.enabled=false \
   --wait --timeout "${TIMEOUT_SECONDS}s"
 
