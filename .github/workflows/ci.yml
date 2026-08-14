@@ -288,40 +288,7 @@ jobs:
           )
           helm template manticore-streams helm-chart --kube-version v1.32.5 "${ci_overrides[@]}" > artifacts-rendered-helm.yaml
           mkdir -p artifacts
-          helm upgrade --install manticore-streams helm-chart --namespace manticore-streams --create-namespace --wait --timeout 600s "${ci_overrides[@]}" > artifacts/helm-upgrade.log 2>&1 &
-          helm_pid=$!
-          next_report=0
-          while kill -0 "$helm_pid" 2>/dev/null; do
-            failed_jobs=$(kubectl -n "$APP_NAMESPACE" get jobs -o jsonpath='{range .items[?(@.status.conditions)]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="Failed")]}{.status}{end}{"\n"}{end}' 2>/dev/null | awk '$2 == "True" { print $1 }' || true)
-            if [ -n "$failed_jobs" ]; then
-              echo "Helm deployment has failed Job(s): $failed_jobs" >&2
-              for job in $failed_jobs; do
-                echo "--- Failed Job: $job ---" >&2
-                kubectl -n "$APP_NAMESPACE" describe "job/$job" || true
-                kubectl -n "$APP_NAMESPACE" logs "job/$job" --all-containers --prefix || true
-              done
-              kill "$helm_pid" 2>/dev/null || true
-              wait "$helm_pid" 2>/dev/null || true
-              cat artifacts/helm-upgrade.log
-              exit 1
-            fi
-            now=$(date +%s)
-            if [ "$now" -ge "$next_report" ]; then
-              echo '--- waiting for Helm deployment ---'
-              kubectl -n "$APP_NAMESPACE" get pods,jobs -o wide || true
-              kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -20 || true
-              tail -20 artifacts/helm-upgrade.log || true
-              next_report=$((now + 30))
-            fi
-            sleep 10
-          done
-          if wait "$helm_pid"; then
-            cat artifacts/helm-upgrade.log
-          else
-            status=$?
-            cat artifacts/helm-upgrade.log
-            exit "$status"
-          fi
+          helm upgrade --install manticore-streams helm-chart --namespace manticore-streams --create-namespace --wait --timeout 600s "${ci_overrides[@]}" 2>&1 | tee artifacts/helm-upgrade.log
       - name: Wait for application workloads
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
