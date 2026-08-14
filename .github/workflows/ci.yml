@@ -316,7 +316,7 @@ jobs:
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'
       - name: Seed Laravel cluster test user
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan db:seed --class=TestDataSeeder --force
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan db:seed --class='\TestDataSeeder' --force
       - name: Run Laravel cluster integration tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: |
