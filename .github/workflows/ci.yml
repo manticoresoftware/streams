@@ -42,7 +42,10 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - run: docker build -t streams/${{ matrix.component }}:ci -f docker/${{ matrix.component }}/Dockerfile docker/${{ matrix.component }}
       - name: Archive validated image
-        run: docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
+        run: |
+          set -euo pipefail
+          docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
+          gzip -t ${{ matrix.component }}.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: ci-image-${{ matrix.component }}
@@ -64,7 +67,10 @@ jobs:
       - run: cp -a ui/. docker/${{ matrix.component }}/source/
       - run: docker build -t streams/${{ matrix.component }}:ci -f docker/${{ matrix.component }}/Dockerfile docker/${{ matrix.component }}
       - name: Archive validated image
-        run: docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
+        run: |
+          set -euo pipefail
+          docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
+          gzip -t ${{ matrix.component }}.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: ci-image-${{ matrix.component }}
@@ -88,7 +94,10 @@ jobs:
       - run: cp sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar docker/worker/KafkaHandler.jar
       - run: docker build -t streams/worker:ci docker/worker
       - name: Archive validated image
-        run: docker save streams/worker:ci | gzip > worker.tar.gz
+        run: |
+          set -euo pipefail
+          docker save streams/worker:ci | gzip > worker.tar.gz
+          gzip -t worker.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: ci-image-worker
@@ -103,16 +112,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
       - name: Materialize development chart version
-        run: |
-          set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+        run: bash dev-environment/ci/materialize-chart-version.sh
       - run: helm lint helm-chart
       - run: helm template manticore-streams helm-chart --kube-version v1.32.5 > rendered-default.yaml
       - run: docker run --rm -v "$PWD:/work" -w /work ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -kubernetes-version 1.32.5 rendered-default.yaml
@@ -151,7 +151,7 @@ jobs:
           merge-multiple: true
       - name: Load Laravel test images
         run: |
-          set -eux
+          set -euxo pipefail
           for component in manticore ui; do
             gzip -dc "ci-images/${component}.tar.gz" | docker load
             docker image inspect "streams/${component}:ci" >/dev/null
@@ -216,29 +216,10 @@ jobs:
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
       - name: Install K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          curl -fsSL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server --disable=traefik --disable=servicelb
-          sudo chmod 644 /etc/rancher/k3s/k3s.yaml
-          echo 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> "$GITHUB_ENV"
-          end=$(( $(date +%s) + TIMEOUT_SECONDS ))
-          until sudo k3s kubectl get nodes --no-headers 2>/dev/null | grep -q .; do
-            [ "$(date +%s)" -lt "$end" ] || { echo 'K3s did not register a node in time' >&2; sudo journalctl -u k3s --no-pager; exit 1; }
-            sleep 2
-          done
-          sudo k3s kubectl wait --for=condition=Ready node --all --timeout="${TIMEOUT_SECONDS}s"
+        run: bash .github/scripts/k8s/install-k3s.sh
       - name: Materialize development chart version
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+        run: bash .github/scripts/materialize-chart-version.sh
       - name: Download validated images
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         uses: actions/download-artifact@v4
@@ -248,66 +229,16 @@ jobs:
           merge-multiple: true
       - name: Import validated images into K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          tag=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
-          for image_archive in ci-images/*.tar.gz; do
-            gzip -dc "$image_archive" | docker load
-          done
-          components=(manticore scaler rules_checker worker ui ui-nginx)
-          for component in "${components[@]}"; do
-            docker image inspect "streams/${component}:ci" >/dev/null
-            docker tag "streams/${component}:ci" "ghcr.io/manticoresoftware/streams/${component}:${tag}"
-          done
-          for component in "${components[@]}"; do
-            image="ghcr.io/manticoresoftware/streams/${component}:${tag}"
-            docker image save "$image" | sudo k3s ctr -n k8s.io images import -
-            sudo k3s ctr -n k8s.io images list -q | grep -Fx "$image"
-          done
+        run: bash .github/scripts/k8s/import-ci-images.sh
       - name: Install Kafka and chart
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          export TIMEOUT_SECONDS=600
-          sh dev-environment/k8s_tests/install-kafka.sh
-          tag=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
-          ci_overrides=(
-            --set ingress.enabled=false
-            --set podSecurityPolicy.enabled=false
-            --set-json 'imagePullSecrets=[]'
-            --set 'worker.resources.requests.cpu=250m'
-            --set 'worker.resources.requests.memory=512Mi'
-            --set 'worker.resources.limits.cpu=1'
-            --set 'worker.resources.limits.memory=1Gi'
-            --set-string "ui.image.tag=${tag}"
-            --set-string "ui.nginx.image.tag=${tag}"
-            --set-string "scaler.php.image.tag=${tag}"
-            --set-string "worker.image.tag=${tag}"
-            --set-string "manticore.image.tag=${tag}"
-            --set-string "rulesChecker.image.tag=${tag}"
-          )
-          helm template manticore-streams helm-chart --kube-version v1.32.5 "${ci_overrides[@]}" > artifacts-rendered-helm.yaml
-          mkdir -p artifacts
-          helm upgrade --install manticore-streams helm-chart --namespace manticore-streams --create-namespace --wait --timeout 600s "${ci_overrides[@]}" 2>&1 | tee artifacts/helm-upgrade.log
+        run: bash .github/scripts/k8s/install-streams-chart.sh
       - name: Wait for application workloads
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          kubectl get namespace "$APP_NAMESPACE"
-          kubectl -n "$KAFKA_NAMESPACE" get pod "$KAFKA_POD"
-          kubectl -n "$APP_NAMESPACE" rollout status deployment/"$UI_DEPLOYMENT" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" rollout status deployment/"${RELEASE_NAME}-manticoresearch-scaler" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" rollout status statefulset/"${RELEASE_NAME}-manticoresearch-columnar" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" rollout status statefulset/"${RELEASE_NAME}-manticoresearch-ui-mysql" --timeout="${TIMEOUT_SECONDS}s"
-          ui_pod=$(kubectl -n "$APP_NAMESPACE" get pods -l name=manticoresearch-ui -o jsonpath='{.items[0].metadata.name}')
-          test -n "$ui_pod"
-          echo "UI_POD=$ui_pod" >> "$GITHUB_ENV"
+        run: bash .github/scripts/k8s/wait-for-application-workloads.sh
       - name: Create Kafka test topics
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-docs --partitions=1 --replication-factor=1
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-results --partitions=1 --replication-factor=1
+        run: bash .github/scripts/k8s/create-kafka-test-topics.sh
       - name: Migrate and seed Laravel cluster test database
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
@@ -319,170 +250,28 @@ jobs:
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan db:seed --class='\TestDataSeeder' --force
       - name: Run Laravel cluster integration tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eu
-          kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c '
-            test -x ./vendor/bin/phpunit
-            php -d short_open_tag=off ./vendor/bin/phpunit --testsuite Cluster --list-tests --stderr | tee /tmp/cluster-test-list.txt
-            grep -Fqx " - Tests\\Cluster\\ClusterTest::assignUser" /tmp/cluster-test-list.txt
-            php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Cluster --stderr
-          '
+        run: bash .github/scripts/k8s/run-laravel-cluster-tests.sh
       - name: Wait for generated pipeline
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eu
-          started=$(date +%s)
-          end=$(( $(date +%s) + PIPELINE_CREATION_TIMEOUT_SECONDS ))
-          next_report=$started
-          pipeline=''
-          while [ "$(date +%s)" -lt "$end" ]; do
-            pipeline=$(kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker -o jsonpath='{range .items[*]}{.metadata.name}{end}')
-            [ -n "$pipeline" ] && break
-            now=$(date +%s)
-            if [ "$now" -ge "$next_report" ]; then
-              printf 'Pipeline creation: waiting (%ss elapsed, %ss remaining)\n' "$((now - started))" "$((end - now))"
-              kubectl -n "$APP_NAMESPACE" get statefulsets -l app.kubernetes.io/component=worker
-              next_report=$((now + 30))
-            fi
-            sleep 5
-          done
-          if [ -z "$pipeline" ]; then
-            echo "Pipeline creation: no StatefulSet after ${PIPELINE_CREATION_TIMEOUT_SECONDS}s" >&2
-            echo '--- Pipeline failure summary ---' >&2
-            kubectl -n "$APP_NAMESPACE" get pods,statefulsets,jobs -o wide || true
-            kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -20 || true
-            echo '--- UI service account permissions (statefulsets/services/PVCs) ---' >&2
-            kubectl auth can-i create statefulsets.apps --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
-            kubectl auth can-i create services --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
-            kubectl auth can-i create persistentvolumeclaims --as="system:serviceaccount:${APP_NAMESPACE}:ui-admin-sa-${APP_NAMESPACE}" -n "$APP_NAMESPACE" || true
-            echo '--- UI PHP logs (last 100 lines) ---' >&2
-            kubectl -n "$APP_NAMESPACE" logs "$UI_POD" -c "$UI_CONTAINER" --tail=100 --prefix || true
-            echo 'Detailed pod logs and full resources are in the k8s-e2e-diagnostics artifact.' >&2
-            exit 1
-          fi
-          printf 'Pipeline creation: found %s after %ss\n' "$pipeline" "$(( $(date +%s) - started ))"
-          kubectl -n "$APP_NAMESPACE" rollout status "statefulset/$pipeline" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" get statefulset "$pipeline"
-          kubectl -n "$APP_NAMESPACE" get pods -l "name=${pipeline#${RELEASE_NAME}-}" -o wide
-          echo "PIPELINE=$pipeline" >> "$GITHUB_ENV"
+        run: bash .github/scripts/k8s/wait-for-generated-pipeline.sh
       - name: Wait for Kafka consumer assignment
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eu
-          end=$(( $(date +%s) + TIMEOUT_SECONDS ))
-          next_report=0
-          group_members=''
-          while [ "$(date +%s)" -lt "$end" ]; do
-            group_members=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group ms_test_stream --members --verbose 2>&1 || true)
-            if printf '%s\n' "$group_members" | grep -Eq 'my-docs(:0|\(0\))'; then
-              printf 'Kafka consumer group ms_test_stream is assigned my-docs partition 0\n'
-              exit 0
-            fi
-            now=$(date +%s)
-            if [ "$now" -ge "$next_report" ]; then
-              printf 'Kafka consumer assignment: waiting for ms_test_stream to receive my-docs partition 0\n%s\n' "$group_members"
-              next_report=$((now + 30))
-            fi
-            sleep 5
-          done
-          printf 'Kafka consumer group ms_test_stream was not assigned my-docs partition 0 within %ss\n%s\n' "$TIMEOUT_SECONDS" "$group_members" >&2
-          exit 1
+        run: bash .github/scripts/k8s/wait-for-kafka-consumer-assignment.sh
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          input_start_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-docs | awk -F: 'END { print $3 }')
-          start_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-results | awk -F: 'END { print $3 }')
-          echo "INPUT_START_OFFSET=${input_start_offset:-0}" >> "$GITHUB_ENV"
-          echo "START_OFFSET=${start_offset:-0}" >> "$GITHUB_ENV"
+        run: bash .github/scripts/k8s/capture-kafka-start-offsets.sh
       - name: Start Kafka fixture producer
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          kubectl -n "$KAFKA_NAMESPACE" apply -f - <<EOF
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: ${KAFKA_FIXTURE_PRODUCER_POD}
-            labels:
-              app.kubernetes.io/name: kafka-fixture-producer
-          spec:
-            restartPolicy: Never
-            containers:
-              - name: producer
-                image: docker.io/bitnamilegacy/kafka:4.0.0-debian-12-r10
-                command: ["sh", "-c", "sleep infinity"]
-                resources:
-                  requests:
-                    cpu: 250m
-                    memory: 512Mi
-                  limits:
-                    cpu: "1"
-                    memory: 1Gi
-          EOF
-          kubectl -n "$KAFKA_NAMESPACE" wait --for=condition=Ready "pod/${KAFKA_FIXTURE_PRODUCER_POD}" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$KAFKA_NAMESPACE" cp dev-environment/kafka/test_data.tar.gz "${KAFKA_FIXTURE_PRODUCER_POD}:/tmp/test_data.tar.gz"
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
-          fixture_records=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- sh -c 'wc -l < /tmp/test_data.json')
-          echo "FIXTURE_RECORDS=${fixture_records}" >> "$GITHUB_ENV"
+        run: bash .github/scripts/k8s/start-kafka-fixture-producer.sh
       - name: Publish Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eu
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- sh -c 'timeout 120s /opt/bitnami/kafka/bin/kafka-console-producer.sh --bootstrap-server my-kafka.kafka.svc.cluster.local:9092 --topic my-docs < /tmp/test_data.json'
-          input_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-docs | awk -F: 'END { print $3 }')
-          expected_input_offset=$((INPUT_START_OFFSET + FIXTURE_RECORDS))
-          printf 'Kafka input: start=%s current=%s expected=%s\n' "$INPUT_START_OFFSET" "${input_offset:-0}" "$expected_input_offset"
-          [ "${input_offset:-0}" -eq "$expected_input_offset" ]
+        run: bash .github/scripts/k8s/publish-kafka-fixture.sh
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eu
-          end=$(( $(date +%s) + TIMEOUT_SECONDS ))
-          expected_offset=$((START_OFFSET + EXPECTED_RECORDS))
-          next_report=0
-          while [ "$(date +%s)" -lt "$end" ]; do
-            current_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-results | awk -F: 'END { print $3 }')
-            current_offset=${current_offset:-0}
-            if [ "$current_offset" -eq "$expected_offset" ]; then
-              printf 'Processed exactly %s records\n' "$EXPECTED_RECORDS"
-              exit 0
-            fi
-            now=$(date +%s)
-            if [ "$now" -ge "$next_report" ]; then
-              printf 'Kafka output: start=%s current=%s expected=%s\n' "$START_OFFSET" "$current_offset" "$expected_offset"
-              kubectl -n "$APP_NAMESPACE" get statefulset "$PIPELINE"
-              kubectl -n "$APP_NAMESPACE" get pods -l "name=${PIPELINE#${RELEASE_NAME}-}" -o wide
-              next_report=$((now + 30))
-            fi
-            sleep 10
-          done
-          echo "Pipeline $PIPELINE did not produce offset $expected_offset within ${TIMEOUT_SECONDS}s" >&2
-          echo '--- Kafka topic offsets ---'
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-docs || true
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-results || true
-          echo '--- Kafka consumer group ms_test_stream ---'
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group ms_test_stream || true
-          kubectl -n "$APP_NAMESPACE" describe "statefulset/$PIPELINE" || true
-          kubectl -n "$APP_NAMESPACE" get events --sort-by=.lastTimestamp | tail -30 || true
-          kubectl -n "$APP_NAMESPACE" get pods -l "name=${PIPELINE#${RELEASE_NAME}-}" -o wide || true
-          for pod in $(kubectl -n "$APP_NAMESPACE" get pods -l "name=${PIPELINE#${RELEASE_NAME}-}" -o name); do
-            kubectl -n "$APP_NAMESPACE" describe "$pod" || true
-            for container in $(kubectl -n "$APP_NAMESPACE" get "$pod" -o jsonpath='{.spec.containers[*].name}'); do
-              case "$container" in
-                *-manticore|*-worker)
-                  echo "--- Pipeline container logs: $pod ($container) ---"
-                  kubectl -n "$APP_NAMESPACE" logs "$pod" -c "$container" --prefix || true
-                  echo "--- Previous pipeline container logs: $pod ($container) ---"
-                  kubectl -n "$APP_NAMESPACE" logs "$pod" -c "$container" --previous --prefix || true
-                  ;;
-              esac
-            done
-          done
-          exit 1
+        run: bash .github/scripts/k8s/verify-kafka-processing.sh
       - name: Collect diagnostics
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
-        run: sh dev-environment/k8s_tests/collect-diagnostics.sh artifacts/k8s
+        run: bash .github/scripts/k8s/collect-diagnostics.sh artifacts/k8s
       - uses: actions/upload-artifact@v4
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         with:
@@ -509,15 +298,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Materialize image version
         run: |
-          set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+          bash .github/scripts/materialize-chart-version.sh
           version=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
           case "$version" in *"\$Format:"*) echo 'Chart version was not materialized'; exit 1;; esac
           echo "IMAGE_TAG=${version}" >> "$GITHUB_ENV"
@@ -529,7 +310,7 @@ jobs:
           merge-multiple: true
       - name: Push tested images to GHCR
         run: |
-          set -eux
+          set -euxo pipefail
           for image_archive in ci-images/*.tar.gz; do
             gzip -dc "$image_archive" | docker load
           done
@@ -555,14 +336,7 @@ jobs:
         id: package
         run: |
           set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+          bash .github/scripts/materialize-chart-version.sh
           version=$(awk '/^version:/ { print $2; exit }' helm-chart/Chart.yaml)
           app_version=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
           test "$version" = "$app_version"
