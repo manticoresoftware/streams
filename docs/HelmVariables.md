@@ -1,10 +1,5 @@
 # Helm Variables
 
-### Container registry section
-Parameter | Description | Default
---------- | ----------- | -------
-`imagePullSecrets` | Kubernetes image-pull secret names for private GHCR images | `[{name: registry-manticore-streams}]`
-
 ### UI section
 Parameter | Description | Default
 --------- | ----------- | -------

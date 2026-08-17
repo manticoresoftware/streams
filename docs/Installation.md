@@ -13,11 +13,7 @@ You can't use **GIT clone**. Download the `.tgz` chart asset from the GitHub Rel
 
 ## Container images
 
-The chart defaults to private images hosted at `ghcr.io/manticoresoftware/streams`. Before installing, create an image-pull secret in the release namespace with a GitHub token that has `read:packages` access:
-
-`kubectl create secret docker-registry registry-manticore-streams --namespace={namespace} --docker-server=ghcr.io --docker-username={github-user} --docker-password={github-token}`
-
-To use a differently named secret, set `imagePullSecrets` in your values file.
+The chart uses public images hosted at `ghcr.io/manticoresoftware/streams`; no image-pull secret is required.
 
 ## Helm
 

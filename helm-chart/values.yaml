@@ -1,6 +1,3 @@
-imagePullSecrets:
-  - name: registry-manticore-streams
-
 ui:
   replicas: 1
   userId: 33

@@ -204,7 +204,6 @@ chart_overrides() {
   printf '%s\n' \
     '--set' 'ingress.enabled=false' \
     '--set' 'podSecurityPolicy.enabled=false' \
-    '--set-json' 'imagePullSecrets=[]' \
     '--set' 'worker.resources.requests.cpu=250m' \
     '--set' 'worker.resources.requests.memory=512Mi' \
     '--set' 'worker.resources.limits.cpu=1' \
