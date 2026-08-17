@@ -344,8 +344,9 @@ jobs:
           case "$version" in *"\$Format:"*) echo 'Chart version was not materialized'; exit 1;; esac
           helm lint helm-chart
           helm package helm-chart --destination release-artifacts
+          mv "release-artifacts/manticoresearch-${version}.tgz" "release-artifacts/streams-${version}.tgz"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "asset=release-artifacts/manticoresearch-${version}.tgz" >> "$GITHUB_OUTPUT"
+          echo "asset=release-artifacts/streams-${version}.tgz" >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v2.3.2
         with:
