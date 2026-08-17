@@ -2,6 +2,7 @@
 * [⚡ How it works](HowItWorks.md)
 * [✔ ️Installation](Installation.md)
     * [Helm chart variables](HelmVariables.md)
+* [Local k3s CI stand](ci/local-k3s.md)
 * Ready to work
     * [Roles](ReadyToWork/Roles.md)
     * [Admin Section](ReadyToWork/AdminSection.md)

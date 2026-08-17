@@ -18,6 +18,36 @@ spec:
       serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
       securityContext:
         fsGroup: {{ .Values.ui.userId }}
+      initContainers:
+      - name: wait-{{ .Chart.Name }}-ui-mysql
+        image: {{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag | default .Chart.AppVersion}}
+        imagePullPolicy: {{ .Values.ui.image.imagePullPolicy }}
+        command:
+          - sh
+          - -c
+          - |
+            for i in $(seq 1 {{ .Values.ui.migrationWait.maxAttempts }}); do
+              if php -r 'exit(@fsockopen(getenv("DB_HOST"), (int) getenv("DB_PORT"), $errno, $errstr, 2) ? 0 : 1);'; then
+                echo "MySQL is reachable"
+                exit 0
+              fi
+
+              echo "Waiting for MySQL to become reachable ($i/{{ .Values.ui.migrationWait.maxAttempts }})"
+              sleep {{ .Values.ui.migrationWait.sleepSeconds }}
+            done
+
+            echo "MySQL did not become reachable in time"
+            exit 1
+        securityContext:
+          runAsGroup: {{ .Values.ui.userId }}
+          runAsUser: {{ .Values.ui.userId }}
+        env:
+          - name: DB_HOST
+            value: "{{ include "manticore-streams.fullname" . }}-mysql-service"
+          - name: DB_PORT
+            value: "{{ .Values.mysql.service.port }}"
+        resources:
+          {{- toYaml .Values.ui.initResources | nindent 10 }}
       containers:
       - name: {{ .Chart.Name }}-ui-migrate
         image: {{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag | default .Chart.AppVersion}}

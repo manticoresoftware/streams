@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
         with:
           distribution: temurin
           java-version: '21'
@@ -38,12 +38,15 @@ jobs:
       matrix:
         component: [manticore, scaler, rules_checker]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v3.10.0
       - run: docker build -t streams/${{ matrix.component }}:ci -f docker/${{ matrix.component }}/Dockerfile docker/${{ matrix.component }}
       - name: Archive validated image
-        run: docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
-      - uses: actions/upload-artifact@v4
+        run: |
+          set -euo pipefail
+          docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
+          gzip -t ${{ matrix.component }}.tar.gz
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         with:
           name: ci-image-${{ matrix.component }}
           path: ${{ matrix.component }}.tar.gz
@@ -59,13 +62,16 @@ jobs:
       matrix:
         component: [ui, ui-nginx]
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v3.10.0
       - run: cp -a ui/. docker/${{ matrix.component }}/source/
       - run: docker build -t streams/${{ matrix.component }}:ci -f docker/${{ matrix.component }}/Dockerfile docker/${{ matrix.component }}
       - name: Archive validated image
-        run: docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
-      - uses: actions/upload-artifact@v4
+        run: |
+          set -euo pipefail
+          docker save streams/${{ matrix.component }}:ci | gzip > ${{ matrix.component }}.tar.gz
+          gzip -t ${{ matrix.component }}.tar.gz
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         with:
           name: ci-image-${{ matrix.component }}
           path: ${{ matrix.component }}.tar.gz
@@ -77,8 +83,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
         with:
           distribution: temurin
           java-version: '21'
@@ -88,8 +94,11 @@ jobs:
       - run: cp sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar docker/worker/KafkaHandler.jar
       - run: docker build -t streams/worker:ci docker/worker
       - name: Archive validated image
-        run: docker save streams/worker:ci | gzip > worker.tar.gz
-      - uses: actions/upload-artifact@v4
+        run: |
+          set -euo pipefail
+          docker save streams/worker:ci | gzip > worker.tar.gz
+          gzip -t worker.tar.gz
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         with:
           name: ci-image-worker
           path: worker.tar.gz
@@ -100,30 +109,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
       - name: Materialize development chart version
-        run: |
-          set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+        run: bash .github/scripts/materialize-chart-version.sh
       - run: helm lint helm-chart
       - run: helm template manticore-streams helm-chart --kube-version v1.32.5 > rendered-default.yaml
-      - run: docker run --rm -v "$PWD:/work" -w /work ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -kubernetes-version 1.32.5 rendered-default.yaml
+      - run: docker run --rm -v "$PWD:/work" -w /work ghcr.io/yannh/kubeconform:v0.6.7@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c -strict -summary -kubernetes-version 1.32.5 rendered-default.yaml
 
   changes:
     runs-on: ubuntu-24.04
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v3.0.2
         id: filter
         with:
           filters: |
@@ -132,11 +132,58 @@ jobs:
               - 'ui/**'
               - 'sources/**'
               - 'helm-chart/**'
+              - '.github/docker-compose/laravel-tests.yml'
               - 'dev-environment/k8s_tests/**'
               - '.github/workflows/ci.yml'
 
+  laravel-tests:
+    needs: [image-build, ui-image-build, changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - name: Download Laravel test images
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
+        with:
+          pattern: ci-image-*
+          path: ci-images
+          merge-multiple: true
+      - name: Load Laravel test images
+        run: |
+          set -euxo pipefail
+          for component in manticore ui; do
+            gzip -dc "ci-images/${component}.tar.gz" | docker load
+            docker image inspect "streams/${component}:ci" >/dev/null
+          done
+      - name: Start Laravel test dependencies
+        run: docker compose -f .github/docker-compose/laravel-tests.yml up -d --wait mysql manticore columnar
+      - name: Wait for Laravel database connection
+        run: docker compose -f .github/docker-compose/laravel-tests.yml run --rm --no-deps ui php -r 'for ($attempt = 0; $attempt < 60; $attempt++) { try { new PDO("mysql:host=mysql;dbname=mysql", "root", "mysql"); exit(0); } catch (Throwable $exception) { sleep(1); } } fwrite(STDERR, "MySQL did not accept a Laravel connection within 60 seconds\n"); exit(1);'
+      - name: Initialize Laravel test Manticore schema
+        run: docker compose -f .github/docker-compose/laravel-tests.yml exec -T manticore php /etc/manticoresearch/alter.php --table=pq --batch=500
+      - name: Initialize Laravel test metrics storage
+        run: docker compose -f .github/docker-compose/laravel-tests.yml exec -T columnar mysql -h 127.0.0.1 -P 9306 -e 'CREATE TABLE IF NOT EXISTS metrics (scrapTime timestamp, metric_name text, value float, tag string)'
+      - name: Migrate and seed Laravel test database
+        run: docker compose -f .github/docker-compose/laravel-tests.yml run --rm --no-deps ui php artisan migrate:fresh --seed --force
+      - name: Run Laravel Unit and Feature tests
+        run: docker compose -f .github/docker-compose/laravel-tests.yml run --rm --no-deps ui php -d short_open_tag=off ./vendor/bin/phpunit --do-not-cache-result --testsuite Dev --stderr
+      - name: Collect Laravel test dependency logs
+        if: always()
+        run: docker compose -f .github/docker-compose/laravel-tests.yml logs --no-color > laravel-test-dependencies.log || true
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        if: failure()
+        with:
+          name: laravel-test-dependencies
+          path: laravel-test-dependencies.log
+          retention-days: 3
+          if-no-files-found: warn
+      - name: Remove Laravel test dependencies
+        if: always()
+        run: docker compose -f .github/docker-compose/laravel-tests.yml down --volumes --remove-orphans
+
   k8s-e2e:
-    needs: [worker-tests, image-build, ui-image-build, worker-image-build, helm, changes]
+    needs: [worker-tests, image-build, ui-image-build, worker-image-build, helm, changes, laravel-tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
@@ -144,162 +191,96 @@ jobs:
       KAFKA_NAMESPACE: kafka
       RELEASE_NAME: manticore-streams
       KAFKA_RELEASE_NAME: my-kafka
+      KAFKA_FIXTURE_PRODUCER_POD: kafka-fixture-producer
       TIMEOUT_SECONDS: 600
+      PIPELINE_CREATION_TIMEOUT_SECONDS: 60
       EXPECTED_RECORDS: 9418
       KAFKA_POD: my-kafka-controller-0
       UI_DEPLOYMENT: manticore-streams-manticoresearch-ui
       UI_CONTAINER: manticoresearch-ui
-      KIND_CLUSTER_NAME: chart-testing
+      K3S_VERSION: v1.32.5+k3s1
+      K3S_BINARY_SHA256: 9624ef0534b1be432b4ce8dd94dcd7241ed02451d970a4d38943baccf5c60dce
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
       - name: Skip unrelated pull request
         if: github.event_name == 'pull_request' && needs.changes.outputs.relevant != 'true'
         run: echo 'No Kubernetes-relevant files changed.'
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v4.3.0
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-      - uses: helm/kind-action@v1.12.0
+      - name: Install K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        with:
-          version: v0.27.0
-          node_image: kindest/node:v1.32.5
-          config: dev-environment/k8s_tests/kind-config.yaml
-          cluster_name: chart-testing
+        run: bash .github/scripts/k8s/install-k3s.sh
       - name: Materialize development chart version
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+        run: bash .github/scripts/materialize-chart-version.sh
       - name: Download validated images
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
         with:
           pattern: ci-image-*
           path: ci-images
           merge-multiple: true
-      - name: Load validated images into kind
+      - name: Import validated images into K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          tag=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
-          for image_archive in ci-images/*.tar.gz; do
-            gzip -dc "$image_archive" | docker load
-          done
-          components=(manticore scaler rules_checker worker ui ui-nginx)
-          for component in "${components[@]}"; do
-            docker image inspect "streams/${component}:ci" >/dev/null
-            docker tag "streams/${component}:ci" "ghcr.io/manticoresoftware/streams/${component}:${tag}"
-          done
-          mapfile -t images < <(printf '%s\n' "${components[@]}" | sed "s#^#ghcr.io/manticoresoftware/streams/#; s#\$#:${tag}#")
-          kind load docker-image --name "$KIND_CLUSTER_NAME" "${images[@]}"
+        run: bash .github/scripts/k8s/import-ci-images.sh
       - name: Install Kafka and chart
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          export TIMEOUT_SECONDS=600
-          sh dev-environment/k8s_tests/install-kafka.sh
-          tag=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
-          ci_overrides=(
-            --set ingress.enabled=false
-            --set podSecurityPolicy.enabled=false
-            --set-json 'imagePullSecrets=[]'
-            --set 'worker.resources.requests.cpu=250m'
-            --set 'worker.resources.requests.memory=512Mi'
-            --set 'worker.resources.limits.cpu=1'
-            --set 'worker.resources.limits.memory=1Gi'
-            --set-string "ui.image.tag=${tag}"
-            --set-string "ui.nginx.image.tag=${tag}"
-            --set-string "scaler.php.image.tag=${tag}"
-            --set-string "worker.image.tag=${tag}"
-            --set-string "manticore.image.tag=${tag}"
-            --set-string "rulesChecker.image.tag=${tag}"
-          )
-          helm template manticore-streams helm-chart --kube-version v1.32.5 "${ci_overrides[@]}" > artifacts-rendered-helm.yaml
-          helm upgrade --install manticore-streams helm-chart --namespace manticore-streams --create-namespace --wait --timeout 600s "${ci_overrides[@]}"
+        run: bash .github/scripts/k8s/install-streams-chart.sh
       - name: Wait for application workloads
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          kubectl get namespace "$APP_NAMESPACE"
-          kubectl -n "$KAFKA_NAMESPACE" get pod "$KAFKA_POD"
-          kubectl -n "$APP_NAMESPACE" rollout status deployment/"$UI_DEPLOYMENT" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" rollout status deployment/"${RELEASE_NAME}-manticoresearch-scaler" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" rollout status statefulset/"${RELEASE_NAME}-manticoresearch-columnar" --timeout="${TIMEOUT_SECONDS}s"
-          kubectl -n "$APP_NAMESPACE" rollout status statefulset/"${RELEASE_NAME}-manticoresearch-ui-mysql" --timeout="${TIMEOUT_SECONDS}s"
-          ui_pod=$(kubectl -n "$APP_NAMESPACE" get pods -l name=manticoresearch-ui -o jsonpath='{.items[0].metadata.name}')
-          test -n "$ui_pod"
-          echo "UI_POD=$ui_pod" >> "$GITHUB_ENV"
+        run: bash .github/scripts/k8s/wait-for-application-workloads.sh
       - name: Create Kafka test topics
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-docs --partitions=1 --replication-factor=1
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic my-results --partitions=1 --replication-factor=1
+        run: bash .github/scripts/k8s/create-kafka-test-topics.sh
+      - name: Migrate and seed Laravel cluster test database
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
       - name: Configure Laravel cluster test environment
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'
-      - name: Migrate and seed Laravel test database
+      - name: Seed Laravel cluster test user
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed
-      - name: Run Laravel Unit and Feature tests
-        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/phpunit/phpunit --do-not-cache-result --testsuite Dev --stderr'
+        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan db:seed --class='\TestDataSeeder' --force
       - name: Run Laravel cluster integration tests
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c 'php -d short_open_tag=off ./vendor/phpunit/phpunit --do-not-cache-result --testsuite Cluster --stderr'
+        run: bash .github/scripts/k8s/run-laravel-cluster-tests.sh
+      - name: Wait for generated pipeline
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/wait-for-generated-pipeline.sh
+      - name: Wait for Kafka consumer assignment
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/wait-for-kafka-consumer-assignment.sh
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          kubectl cp dev-environment/kafka/test_data.tar.gz "$KAFKA_NAMESPACE/$KAFKA_POD:/tmp/test_data.tar.gz"
-          kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- tar -xzf /tmp/test_data.tar.gz -C /tmp
-          start_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic my-results' | awk -F: 'END { print $3 }')
-          echo "START_OFFSET=${start_offset:-0}" >> "$GITHUB_ENV"
+        run: bash .github/scripts/k8s/capture-kafka-start-offsets.sh
+      - name: Start Kafka fixture producer
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/start-kafka-fixture-producer.sh
       - name: Publish Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-console-producer.sh --broker-list localhost:9092 --topic my-docs < /tmp/test_data.json'
+        run: bash .github/scripts/k8s/publish-kafka-fixture.sh
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
-        run: |
-          set -eux
-          end=$(( $(date +%s) + TIMEOUT_SECONDS ))
-          while [ "$(date +%s)" -lt "$end" ]; do
-            current_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -- sh -c '/opt/bitnami/kafka/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic my-results' | awk -F: 'END { print $3 }')
-            current_offset=${current_offset:-0}
-            if [ "$current_offset" -eq $((START_OFFSET + EXPECTED_RECORDS)) ]; then
-              printf 'Processed exactly %s records\n' "$EXPECTED_RECORDS"
-              exit 0
-            fi
-            printf 'Waiting for output records: start=%s current=%s expected=%s\n' "$START_OFFSET" "$current_offset" "$EXPECTED_RECORDS"
-            sleep 10
-          done
-          echo "output offset did not reach $((START_OFFSET + EXPECTED_RECORDS)) within ${TIMEOUT_SECONDS}s" >&2
-          exit 1
+        run: bash .github/scripts/k8s/verify-kafka-processing.sh
       - name: Collect diagnostics
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
-        run: sh dev-environment/k8s_tests/collect-diagnostics.sh artifacts/k8s
-      - uses: actions/upload-artifact@v4
-        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
+        run: bash .github/scripts/k8s/collect-diagnostics.sh artifacts/k8s
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        if: failure() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         with:
           name: k8s-e2e-diagnostics
           path: |
             artifacts/
             artifacts-rendered-helm.yaml
-          retention-days: 14
+          retention-days: 3
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -310,35 +291,27 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Materialize image version
         run: |
-          set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+          bash .github/scripts/materialize-chart-version.sh
           version=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
           case "$version" in *"\$Format:"*) echo 'Chart version was not materialized'; exit 1;; esac
           echo "IMAGE_TAG=${version}" >> "$GITHUB_ENV"
       - name: Download tested images
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
         with:
           pattern: ci-image-*
           path: ci-images
           merge-multiple: true
       - name: Push tested images to GHCR
         run: |
-          set -eux
+          set -euxo pipefail
           for image_archive in ci-images/*.tar.gz; do
             gzip -dc "$image_archive" | docker load
           done
@@ -358,20 +331,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
       - name: Package release chart
         id: package
         run: |
           set -eux
-          short_sha=$(git rev-parse --short HEAD)
-          chart=helm-chart/Chart.yaml
-          token="\$Format:%h\$"
-          source=$(<"$chart")
-          stripped=${source//"$token"/}
-          replacements=$(( (${#source} - ${#stripped}) / ${#token} ))
-          [ "$replacements" -eq 2 ] || { echo "expected two development-version tokens, found $replacements"; exit 1; }
-          printf '%s\n' "${source//"$token"/$short_sha}" > "$chart"
+          bash .github/scripts/materialize-chart-version.sh
           version=$(awk '/^version:/ { print $2; exit }' helm-chart/Chart.yaml)
           app_version=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
           test "$version" = "$app_version"
@@ -381,7 +347,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "asset=release-artifacts/manticoresearch-${version}.tgz" >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v2.3.2
         with:
           tag_name: ${{ steps.package.outputs.version }}
           name: ${{ steps.package.outputs.version }}
