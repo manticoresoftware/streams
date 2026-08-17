@@ -2,7 +2,7 @@ name: manticore-streams-laravel-tests
 
 services:
   mysql:
-    image: mysql:5.7.22
+    image: mysql:5.7.22@sha256:aaba540cdd9313645d892f4f20573e8b42b30e5be71c054b7befed2f7da5f85b
     platform: linux/amd64
     environment:
       MYSQL_DATABASE: mysql
@@ -30,7 +30,7 @@ services:
       retries: 60
 
   columnar:
-    image: manticoresearch/manticore:25.0.0
+    image: manticoresearch/manticore:25.0.0@sha256:4b1595624dbe4a9f917c34e65a06455793fecee15d3b74c4f03c0eb28de7e1c1
     platform: linux/amd64
     environment:
       EXTRA: "1"

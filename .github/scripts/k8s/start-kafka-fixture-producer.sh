@@ -12,7 +12,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: producer
-      image: docker.io/bitnamilegacy/kafka:4.0.0-debian-12-r10
+      image: docker.io/bitnamilegacy/kafka:4.0.0-debian-12-r10@sha256:aa0b2aee8c5610dd1d18d48b4f1df0dbe3267b5d4c338d36c9af9cbf0529c0b0
       command: ["sh", "-c", "sleep infinity"]
       resources:
         requests:

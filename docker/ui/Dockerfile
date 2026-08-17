@@ -1,4 +1,4 @@
-FROM php:8.3-fpm
+FROM php:8.3-fpm@sha256:b7b2846437277f3d0a6f43161e4e91f82f3649c3e773d36509d53ca6519e2446
 
 RUN apt update && apt install -y \
     librdkafka-dev \
