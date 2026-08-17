@@ -17,7 +17,7 @@ class SourceFactory extends Factory
             'name'  => $this->faker->unique()->word,
             'host'  => 'dev.manticoresearch.com:22',
             'topic' => 'my-docs',
-            'group' => 'MKC_' . $this->faker->word,
+            'group' => 'MS_' . $this->faker->word,
         ];
     }
 }

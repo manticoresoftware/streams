@@ -88,7 +88,7 @@ class GoalsController extends Controller
         if ( ! $request->get('group')) {
             $group = md5(microtime());
             $group = substr($group, 0, 8);
-            $request->request->add(['group' => 'MKC_' . $group]);
+            $request->request->add(['group' => 'MS_' . $group]);
         }
 
         $errors = [];

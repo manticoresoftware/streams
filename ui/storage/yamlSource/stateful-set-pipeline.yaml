@@ -280,8 +280,6 @@ spec:
         {{- end }}
         resources: {{ Values.rulesChecker.resources | toYaml 10 }}
       {{- end }}
-      imagePullSecrets:
-      - name: registry-manticore-streams
   volumeClaimTemplates:
   - metadata:
       name: data

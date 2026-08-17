@@ -10,7 +10,7 @@ apiVersion: extensions/v1beta1
 {{- end }}
 kind: Ingress
 metadata:
-  name: mkc
+  name: {{ $fullName }}
   labels:
     {{- include "manticore-streams.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}

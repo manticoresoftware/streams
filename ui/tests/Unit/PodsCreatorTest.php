@@ -27,7 +27,7 @@ class PodsCreatorTest extends TestCase
                 'outputHost'  => 'dev.manticoresearch.com:21',
                 'inputTopic'  => 'my-docs',
                 'outputTopic' => 'out.{username}',
-                'groupName'   => 'MKC_dolores',
+                'groupName'   => 'MS_dolores',
             ],
         'worker'       =>
             [

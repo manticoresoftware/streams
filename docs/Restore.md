@@ -9,7 +9,7 @@
 
 Backups are stored in the `backup / data` folder
 * database.sql - backup of UI pod
-* indexes-mkc-m{N}-manticore.tar.gz - stream's backup where stream id = `N` 
+* indexes-ms-m{N}-manticore.tar.gz - stream's backup where stream id = `N`
 
 
 Recovery takes place gradually, stream after stream. 

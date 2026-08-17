@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'Manticore Kafka Connector'),
+    'name' => env('APP_NAME', 'Manticore Streams'),
 
     /*
     |--------------------------------------------------------------------------

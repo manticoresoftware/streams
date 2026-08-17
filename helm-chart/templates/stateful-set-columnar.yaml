@@ -73,10 +73,6 @@ spec:
         {{- end }}
         resources:
           {{- toYaml .Values.columnar.resources | nindent 10 }}
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
   volumeClaimTemplates:
   - metadata:
       name: storage

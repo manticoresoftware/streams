@@ -1,98 +1,67 @@
 # Installation
 
-Manticore Streams for now supports only Apache Kafka as a source of an input stream. Read
-this [article](InstallFromScratch/Kafka.md) about installation of Apache Kafka
+Manticore Streams consumes Apache Kafka topics. Before installing it, make sure that Kafka is reachable from the Kubernetes namespace where Manticore Streams will run. See [Kafka setup](InstallFromScratch/Kafka.md) for a basic Kubernetes example.
 
----
+## Requirements
 
-# Cloning
+- Kubernetes
+- Helm 3
+- An ingress controller when `ingress.enabled` is left at its default of `true`
+- An Apache Kafka cluster reachable from the Manticore Streams workloads
 
-### ⚠️ Attention! ⚠️
+## Download the chart
 
-You can't use **GIT clone**. Download the `.tgz` chart asset from the GitHub Release for the desired version instead. The release package has matching chart and image versions already materialized.
+Download the `streams-<version>.tgz` asset for the desired version from [GitHub Releases](https://github.com/manticoresoftware/streams/releases). The package contains matching chart and image versions. Images are public at `ghcr.io/manticoresoftware/streams`, so no image-pull secret is required.
 
-## Container images
+## Install with Helm
 
-The chart defaults to private images hosted at `ghcr.io/manticoresoftware/streams`. Before installing, create an image-pull secret in the release namespace with a GitHub token that has `read:packages` access:
+Choose a release name, namespace, administrator credentials, and ingress hostname. The following command creates the namespace when it does not already exist:
 
-`kubectl create secret docker-registry registry-manticore-streams --namespace={namespace} --docker-server=ghcr.io --docker-username={github-user} --docker-password={github-token}`
-
-To use a differently named secret, set `imagePullSecrets` in your values file.
-
-## Helm
-
-<!-- example helm-install -->
-For installing, you must specify login and password for the admin, and ingress host of you project
-
-Important parameters there:
-
-* ui.admin.email - email for super admin auth
-* ui.admin.pass - password for super admin auth
-* ingress.hosts - set host for UI access
-
-<!-- intro -->
-
-### Helm 3
-
-<!-- request Helm 3 -->
-
-```
-helm install {name} --namespace {namespace} \
---set ui.admin.email="user@manticoresearch.com" \
---set ui.admin.pass="myNewPassword" \
---set ingress.hosts[0].host="kafka.manticoresearch.com" \
---set ingress.hosts[0].paths[0]="/" ./manticoresearch-{version}.tgz
+```sh
+helm install manticore-streams ./streams-<version>.tgz \
+  --namespace manticore-streams \
+  --create-namespace \
+  --set ui.admin.email='admin@example.com' \
+  --set ui.admin.pass='change-this-password' \
+  --set ingress.hosts[0].host='streams.example.com' \
+  --set ingress.hosts[0].paths[0]='/'
 ```
 
-<!-- intro -->
+To deploy without an ingress controller, add `--set ingress.enabled=false` and expose the UI service using the mechanism appropriate for the cluster.
 
-### Helm 2
+Check deployment status:
 
-<!-- request Helm 2 -->
-
-```
-helm install --name {name} --namespace {namespace} \
---set ui.admin.email="user@manticoresearch.com" \
---set ui.admin.pass="myNewPassword" \
---set ingress.hosts[0].host="kafka.manticoresearch.com" \
---set ingress.hosts[0].paths[0]="/" ./manticoresearch-{version}.tgz
+```sh
+kubectl get pods --namespace manticore-streams
 ```
 
-<!-- end -->
-<!-- example helm-filled-install -->
-The release package uses the `values.yaml` embedded when it was built. To use your own edited values file, pass it explicitly with `-f values.yaml`:
+Once the UI is available, sign in using the administrator credentials and configure Kafka sources, destinations, and streams.
 
-<!-- intro -->
+## Custom values
 
-### Helm 3
+To keep installation settings in a file, put them in `values.yaml` and pass the file to Helm:
 
-<!-- request Helm 3 -->
-
-```helm install {name} --namespace {namespace} -f values.yaml ./manticoresearch-{version}.tgz```
-
-<!-- intro -->
-
-### Helm 2
-
-<!-- request Helm 2 -->
-
-```helm install --name {name} --namespace {namespace} -f values.yaml ./manticoresearch-{version}.tgz```
-
-<!-- end -->
-
-**That's all**
-
-___
-
-Check for deploy:
-
-```
-$ kubectl get po -n {namespace}
-NAME                                    READY   STATUS    RESTARTS   AGE
-mkc-columnar-0                          1/1     Running   0          1m
-mkc-scaler-69554f869b-g7b5f             1/1     Running   0          1m
-mkc-ui-0                                1/1     Running   0          1m
-mkc-ui-mysql-0                          1/1     Running   0          1m
+```sh
+helm install manticore-streams ./streams-<version>.tgz \
+  --namespace manticore-streams \
+  --create-namespace \
+  --values values.yaml
 ```
 
-After our project has been deployed we can start to create streams
+See [Helm chart variables](HelmVariables.md) for the available settings.
+
+## Upgrade and uninstall
+
+Upgrade an existing deployment with a downloaded release asset:
+
+```sh
+helm upgrade manticore-streams ./streams-<version>.tgz \
+  --namespace manticore-streams \
+  --reuse-values
+```
+
+Remove the release with:
+
+```sh
+helm uninstall manticore-streams --namespace manticore-streams
+```
