@@ -9,5 +9,6 @@
 /docker/ui/source/
 /docker/ui-nginx/source/
 /artifacts/
+/dev-environment/k8s_tests/.env
 **/.DS_Store
 **/._*
