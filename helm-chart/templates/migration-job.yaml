@@ -14,7 +14,8 @@ spec:
       labels:
         name: {{ .Chart.Name }}-ui-migrate
     spec:
-      restartPolicy: OnFailure
+      # Keep failed attempts available for diagnostics.
+      restartPolicy: Never
       serviceAccountName: ui-admin-sa-{{ .Release.Namespace }}
       securityContext:
         fsGroup: {{ .Values.ui.userId }}

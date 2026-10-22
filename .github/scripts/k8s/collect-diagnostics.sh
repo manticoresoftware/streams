@@ -15,6 +15,7 @@ for namespace in "$APP_NAMESPACE" "$KAFKA_NAMESPACE"; do
     safe_name=$(printf '%s' "$pod" | tr '/' '_')
     (
       kubectl --request-timeout="$KUBECTL_TIMEOUT" describe -n "$namespace" "$pod" >"$ARTIFACT_DIR/${namespace}-${safe_name}-describe.txt" 2>&1 || true
+      kubectl --request-timeout="$KUBECTL_TIMEOUT" logs -n "$namespace" "$pod" --all-containers=true --prefix=true --tail=200 >"$ARTIFACT_DIR/${namespace}-${safe_name}-logs.txt" 2>&1 || true
     ) &
   done
   wait

@@ -208,6 +208,7 @@ chart_overrides() {
     '--set' 'worker.resources.requests.memory=512Mi' \
     '--set' 'worker.resources.limits.cpu=1' \
     '--set' 'worker.resources.limits.memory=1Gi' \
+    '--set' 'mysql.resources.limits.memory=1Gi' \
     '--set-string' "ui.image.tag=${tag}" \
     '--set-string' "ui.nginx.image.tag=${tag}" \
     '--set-string' "scaler.php.image.tag=${tag}" \

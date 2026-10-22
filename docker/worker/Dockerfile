@@ -5,8 +5,13 @@ RUN apt-get update \
         lsb-release \
         wget \
         default-mysql-client \
-        php8.3-cli \
-        php8.3-mbstring \
+        software-properties-common \
+    && add-apt-repository -y ppa:ondrej/php \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        php8.5-cli \
+        php8.5-mbstring \
+    && php -r 'if (PHP_VERSION_ID < 80512 || PHP_VERSION_ID >= 80600) exit(1);' \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r worker && useradd -r -g worker worker

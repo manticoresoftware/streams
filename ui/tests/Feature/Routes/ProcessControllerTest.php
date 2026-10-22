@@ -175,8 +175,7 @@ metadata:
     app.kubernetes.io/managed-by: null
     app.kubernetes.io/app: p$aiProcess-process
 data:
-  searchd_include.conf: |
-
+  searchd_include.conf: ''
   rt_include.conf: |
     acv=cba stopwords='/etc/manticoresearch/conf_mount/stopwords.txt' mode='alert' exceptions='/etc/manticoresearch/conf_mount/exceptions.txt'
   stopwords.txt: |
@@ -267,12 +266,10 @@ metadata:
     app.kubernetes.io/managed-by: null
     app.kubernetes.io/app: p$aiProcess-process
 data:
-  searchd_include.conf: |
-
+  searchd_include.conf: ''
   rt_include.conf: |
     stopwords = 'en, it, ru' type='rt' exceptions='/etc/manticoresearch/conf_mount/exceptions.txt'
-  stopwords.txt: |
-
+  stopwords.txt: ''
   exceptions.txt: |
     at & t => at&t
     AT&T => AT&T
@@ -399,7 +396,7 @@ data:
     }
 
 
-    public function wrongAttrProvider(): array
+    public static function wrongAttrProvider(): array
     {
         return [
             [
@@ -418,9 +415,9 @@ data:
                 ]
             ],
             [
-                'name' => '{}[s]\\',
-                'type' => 'non exist type',
-                'path' => '[]wrong.non[]exist.node',
+                '{}[s]\\',
+                'non exist type',
+                '[]wrong.non[]exist.node',
                 [
                     "message" => "Non allowed symbols in node \"[]wrong\" Full path: \"[]wrong.non[]exist.node\" (and 2 more errors)",
                     "errors" => [
