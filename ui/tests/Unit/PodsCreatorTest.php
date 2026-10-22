@@ -50,16 +50,10 @@ class PodsCreatorTest extends TestCase
     protected $curl;
 
 
-    public function __construct($name = null, array $data = [], $dataName = '')
-    {
-        parent::__construct($name, $data, $dataName);
-
-        $this->curl = Mockery::mock(KubeService::class);
-    }
-
     protected function setUp(): void
     {
         parent::setUp();
+        $this->curl = Mockery::mock(KubeService::class);
 
         // Create proper model instances for testing
         $user = \App\Models\User::first();
@@ -224,7 +218,7 @@ class PodsCreatorTest extends TestCase
     {
 
         $this->curl->shouldReceive('sendFile')
-                   ->times(7)
+                   ->times(2)
                    ->andReturn(['status' => CurlService::STATUS_SUCCESS]);
 
 

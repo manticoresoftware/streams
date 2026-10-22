@@ -1,9 +1,9 @@
-FROM php:8.3-fpm
+FROM php:8.5.12-fpm@sha256:f665ad19c093eee54db3a03c89102d6828b1bbf4f327689e5947a8686c6585a1
 
 COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 RUN apt update && apt install -y librdkafka-dev zlib1g-dev libpng-dev libjpeg-dev git \
     libfreetype6-dev libzip-dev procps \
-    && pecl install rdkafka  \
+    && pecl install rdkafka-6.0.5  \
     && pecl install xdebug \
     && echo "extension=rdkafka.so" > /usr/local/etc/php/conf.d/rdkafka.ini \
     && echo "zend_extension=xdebug" > /usr/local/etc/php/conf.d/xdebug.ini \

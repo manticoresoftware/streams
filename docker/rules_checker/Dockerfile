@@ -1,4 +1,4 @@
-FROM php:8.3-fpm@sha256:b7b2846437277f3d0a6f43161e4e91f82f3649c3e773d36509d53ca6519e2446
+FROM php:8.5.12-fpm@sha256:f665ad19c093eee54db3a03c89102d6828b1bbf4f327689e5947a8686c6585a1
 
 # Install Nginx, kcat, mysql-client, curl, supervisor, procps, and oniguruma
 RUN apt-get update && apt-get install -y \
@@ -32,10 +32,10 @@ RUN chmod -R 755 /get_messages.sh /loop.sh && chown -R 999:999 /get_messages.sh 
 
 # Copy configuration files
 COPY nginx.conf /etc/nginx/sites-available/default
-COPY php-fpm.conf /etc/php/8.3/fpm/pool.d/www.conf
+COPY php-fpm.conf /usr/local/etc/php-fpm.d/www.conf
 COPY supervisord.conf /etc/supervisor/supervisord.conf
-RUN chmod 644 /etc/nginx/sites-available/default /etc/php/8.3/fpm/pool.d/www.conf /etc/supervisor/supervisord.conf \
-    && chown 999:999 /etc/nginx/sites-available/default /etc/php/8.3/fpm/pool.d/www.conf /etc/supervisor/supervisord.conf
+RUN chmod 644 /etc/nginx/sites-available/default /usr/local/etc/php-fpm.d/www.conf /etc/supervisor/supervisord.conf \
+    && chown 999:999 /etc/nginx/sites-available/default /usr/local/etc/php-fpm.d/www.conf /etc/supervisor/supervisord.conf
 
 # Create symlink to Nginx site configuration, overwriting if it exists
 RUN ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/

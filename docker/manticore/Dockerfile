@@ -3,7 +3,9 @@ FROM manticoresearch/manticore:7.4.6@sha256:9fb96a2bfeec4b81b84aad7d55db396c6389
 RUN apt-get update && echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections \
     && apt-get -y install wget software-properties-common supervisor logrotate git zip unzip wget gnupg curl tree cmake \
     && add-apt-repository -y ppa:ondrej/php && apt update && apt install -y \
-    php-cli php-mysql php-zip php-curl php-xml php-mbstring && rm -rf /var/lib/apt/lists/*
+    php8.5-cli php8.5-mysql php8.5-zip php8.5-curl php8.5-xml php8.5-mbstring \
+    && php -r 'if (PHP_VERSION_ID < 80512 || PHP_VERSION_ID >= 80600) exit(1);' \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy from docker/manticore/ context
 COPY composer.json manticore.conf starter.sh replica.php alter.php l_probe.sh r_probe.sh quorum.php env_reader.php quorum_fixer.sh /etc/manticoresearch/

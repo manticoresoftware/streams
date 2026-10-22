@@ -1,4 +1,4 @@
-FROM php:8.3-fpm@sha256:b7b2846437277f3d0a6f43161e4e91f82f3649c3e773d36509d53ca6519e2446
+FROM php:8.5.12-fpm@sha256:f665ad19c093eee54db3a03c89102d6828b1bbf4f327689e5947a8686c6585a1
 
 RUN apt update && apt install -y \
     librdkafka-dev \
@@ -9,7 +9,7 @@ RUN apt update && apt install -y \
     libfreetype6-dev \
     libzip-dev \
     procps \
-    && pecl install rdkafka \
+    && pecl install rdkafka-6.0.5 \
     && echo "extension=rdkafka.so" > /usr/local/etc/php/conf.d/rdkafka.ini \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-configure pcntl --enable-pcntl \
