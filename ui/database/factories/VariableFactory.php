@@ -11,7 +11,7 @@ class VariableFactory extends Factory
     {
         $word = $this->faker->words(3, true);
         return [
-            'name' => $this->faker->unique()->word,
+            'name' => 'variable_'.bin2hex(random_bytes(12)),
             'text' => $word
         ];
     }
