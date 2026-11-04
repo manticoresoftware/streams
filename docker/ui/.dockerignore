@@ -1,2 +1,8 @@
 **/.DS_Store
 **/._*
+source/vendor/
+source/.env*
+!source/.env.example
+source/storage/*.key
+source/bootstrap/cache/*.php
+source/.phpunit.result.cache

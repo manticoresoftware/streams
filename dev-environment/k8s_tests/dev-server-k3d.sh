@@ -207,7 +207,8 @@ chart_overrides() {
     '--set' 'worker.resources.requests.cpu=250m' \
     '--set' 'worker.resources.requests.memory=512Mi' \
     '--set' 'worker.resources.limits.cpu=1' \
-    '--set' 'worker.resources.limits.memory=1Gi' \
+    '--set' 'worker.resources.limits.memory=2Gi' \
+    '--set' 'manticore.resources.limits.memory=2Gi' \
     '--set' 'mysql.resources.limits.memory=1Gi' \
     '--set-string' "ui.image.tag=${tag}" \
     '--set-string' "ui.nginx.image.tag=${tag}" \
