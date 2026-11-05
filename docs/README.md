@@ -17,6 +17,7 @@
         * [Results](ReadyToWork/Manager/Results.md)
     * [Streams](ReadyToWork/Streams.md)
     * [API](ReadyToWork/Api/API.md)
+        * [Replace rules](ReadyToWork/Api/ReplaceRules.md)
     * [Prometheus metrics](Prometheus.md)
     * [Backups](Backup.md)
         * [Restore](Restore.md)
