@@ -703,26 +703,17 @@ class ManticoreService extends BaseManticoreService
         $fields = $this->getFields();
         $fieldNames = [];
         foreach ($fields as $field) {
-            $fieldNames[] = '[\s|^]+@' . $field['Field'];
+            $fieldNames[] = preg_quote($field['Field'], '/');
         }
 
-        $fieldNames[] = "[\s|^]+@\(";
+        $fieldNames[] = '\(';
 
-
-        $regex = '/((?!' . implode('|', $fieldNames) . ').)*/usi';
-        preg_match_all($regex, $rule->getQuery(), $matches);
-
-
-        if ($matches[0] === []) {
-            $explodedText[] = $rule->getQuery();
-        } else {
-            $explodedText = $matches[0];
-        }
-
-        foreach ($explodedText as $k => $v) {
-            if ($v === "") {
-                unset($explodedText[$k]);
-            }
+        $explodedText = self::splitQueryByFieldMarkers($rule->getQuery(), $fieldNames);
+        if ($explodedText === null) {
+            $this->setStatusCode(Response::HTTP_UNPROCESSABLE_ENTITY);
+            return [
+                'message' => 'Unable to parse query: ' . preg_last_error_msg()
+            ];
         }
 
         if (!empty($this->urlFields)) {
@@ -1134,6 +1125,33 @@ class ManticoreService extends BaseManticoreService
         return ['status' => CurlService::STATUS_ERROR, 'message' => $result['result']['message'], 'result' => $result];
     }
 
+
+    /**
+     * Split a rule query into chunks that start at a field marker ("@field"
+     * or "@(" preceded by whitespace), the first chunk being whatever comes
+     * before the first marker. Empty chunks are dropped.
+     *
+     * A lookahead split runs in linear time. The previous implementation,
+     * a preg_match_all() over the pattern ((?!<markers>).)* with the "usi"
+     * modifiers, scanned the query character by character inside a capturing
+     * group and exhausted the PCRE JIT stack
+     * (PREG_JIT_STACKLIMIT_ERROR) on queries longer than about 8 KB; the
+     * failure was not checked, so the "@url" rewrite below was silently
+     * skipped and Manticore rejected the rule with
+     * "no field 'url' found in schema".
+     *
+     * @param string   $query
+     * @param string[] $fieldNames preg_quote()d field names, plus '\(' for "@("
+     *
+     * @return string[]|null null when preg_split() fails (see preg_last_error_msg())
+     */
+    public static function splitQueryByFieldMarkers(string $query, array $fieldNames): ?array
+    {
+        $regex = '/[\s|^]+(?=@(?:' . implode('|', $fieldNames) . '))/ui';
+        $parts = preg_split($regex, $query, -1, PREG_SPLIT_NO_EMPTY);
+
+        return $parts === false ? null : $parts;
+    }
 
     private function urlize($fieldName, $in): string
     {
