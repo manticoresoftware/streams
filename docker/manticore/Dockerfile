@@ -1,4 +1,4 @@
-FROM manticoresearch/manticore:32.0.5
+FROM manticoresearch/manticore:dev-32.0.5
 
 RUN apt-get update && echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections \
     && apt-get -y install wget software-properties-common supervisor logrotate git zip unzip wget gnupg curl tree cmake \
