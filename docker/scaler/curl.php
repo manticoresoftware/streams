@@ -113,8 +113,6 @@ class Curl
             return ['status' => self::STATUS_ERROR, 'message' => 'Curl error. ' . curl_error($ch)];
         }
 
-        curl_close($ch);
-
         return ['status' => self::STATUS_SUCCESS, 'result' => json_decode($serverOutput, true)];
     }
 

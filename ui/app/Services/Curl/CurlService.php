@@ -139,8 +139,6 @@ class CurlService
             return ['status' => self::STATUS_ERROR, 'message' => 'Curl error. '.curl_error($ch)];
         }
 
-        curl_close($ch);
-
         if ($this->error) {
             \Log::debug("Curl errors: ".print_r($this->error, true));
         }

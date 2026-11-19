@@ -193,7 +193,6 @@ class Scaler
             $message = 'SKIP_SCALING flag passed. Skipping scaling-related calculations for pipeline '.$this->label;
             $this->log($message);
             $this->response->message = $message;
-            $this->response->printResponse();
 
             return;
         }

@@ -8,3 +8,7 @@ RUN apk add curl-dev
 RUN docker-php-ext-configure curl && \
     docker-php-ext-install curl mysqli && \
     docker-php-ext-enable curl mysqli
+
+# The worker parses the response body as JSON: PHP notices must go to the log
+# (php-fpm stderr), never into the response.
+RUN printf 'display_errors = Off\nlog_errors = On\n' > "$PHP_INI_DIR/conf.d/zz-scaler.ini"
