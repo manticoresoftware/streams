@@ -1241,6 +1241,10 @@ class ManticoreService extends BaseManticoreService
         $queryResults = [];
         foreach ($query as $key => $in) {
             $hashedUrl = '';
+            // "a.com | b.com" explodes into "a.com ", " b.com": trim each
+            // alternative, or the spaces end up inside the hashed host tokens
+            // (md5("com ") instead of md5("com")) and the rule never matches.
+            $in = trim($in);
             if ($in === '') {
                 continue;
             }

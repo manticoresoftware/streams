@@ -179,8 +179,9 @@ class ManticoreServiceTest extends TestCase
             [
                 'generalquery @text querytofind @merged manticoresearch.com | https://mail.google.com/',
                 'generalquery @text querytofind '.
-                '(@merged_host_path 96ef039d822f1cec48a7410eccdf598b 60041c5cd8e2edbb9177f73592d2f164) | '.
-                '(@merged_host_path 9b42dc9339ebf0c4121b9c8155c19f77 68278dfe0d8017d80633478b6f0e6f40)',
+                '(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 ed0bd936751e99c169b7f662e46ce192) | '.
+                '(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 1d5920f4b44b27a802bd77c4f0536f5a '.
+                'be5cab0695415d9363d18ad1345c73eb)',
             ],
             [
                 '@(merged, merged2) https://mail.google.com/',
@@ -214,12 +215,21 @@ class ManticoreServiceTest extends TestCase
             ],
             [
                 '@merged manticoresearch.com | https://mail.google.com/',
-                '(@merged_host_path 96ef039d822f1cec48a7410eccdf598b 60041c5cd8e2edbb9177f73592d2f164) | '.
-                '(@merged_host_path 9b42dc9339ebf0c4121b9c8155c19f77 68278dfe0d8017d80633478b6f0e6f40)',
+                '(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 ed0bd936751e99c169b7f662e46ce192) | '.
+                '(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 1d5920f4b44b27a802bd77c4f0536f5a '.
+                'be5cab0695415d9363d18ad1345c73eb)',
+            ],
+            [
+                // every alternative must hash like the same host on its own:
+                // no spaces from around "|" inside the tokens
+                '@merged cisa.gov | sec.gov | bleepingcomputer.com',
+                '(@merged_host_path 552360015f23b99978d5f1a6bd2b9c7d 2015d943b8df92a7137b4684061cba05) | '.
+                '(@merged_host_path 552360015f23b99978d5f1a6bd2b9c7d b570a78bc7ab9fc0d6a42dfb5010756e) | '.
+                '(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 10e42be178e1c35c4f0a0ce639f63d44)',
             ],
             [
                 '@merged manticoresearch.com | https://mail.google.com/ -https://app.tmetric.com',
-                '(@merged_host_path 96ef039d822f1cec48a7410eccdf598b 60041c5cd8e2edbb9177f73592d2f164) | '.
+                '(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 ed0bd936751e99c169b7f662e46ce192) | '.
                 '(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 1d5920f4b44b27a802bd77c4f0536f5a '.
                 'be5cab0695415d9363d18ad1345c73eb) '.
                 '-(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 1ee5272525893bcc5d6375a5c37f56f4 '.
