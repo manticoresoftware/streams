@@ -1040,6 +1040,27 @@ class ManticoreService extends BaseManticoreService
 
 
     /**
+     * Rebuild a stored URL rule from tags.originalQuery using the same
+     * rewriting logic as addRule(). Does not update any database row.
+     *
+     * Only use this for rules that have no unresolved variables.
+     */
+    public function rebuildUrlQueryFromOriginal(string $originalQuery): string
+    {
+        $rule = new Rule();
+        $rule->setQuery($originalQuery);
+        $error = $this->rewriteUrlFields($rule);
+        if ($error !== null) {
+            throw new \RuntimeException($error);
+        }
+        if ($rule->getTags()->getOriginalQuery() === '') {
+            throw new \RuntimeException('No URL field was rewritten');
+        }
+
+        return $this->toLowerExcludeOperators($rule->getQuery());
+    }
+
+    /**
      * Rewrite every url-type field clause of the rule ("@url host",
      * "@(title,url) host", "@url a.com | b.com -c.com") into the hashed
      * @<field>_host_path / _query / _anchor tokens that the percolate table
