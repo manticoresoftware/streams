@@ -131,15 +131,15 @@ func TestReferenceTransforms(t *testing.T) {
 		needsJava bool
 	}{
 		{"rename wildcard", `{"items":[{"name":"Ann","keep":1},{"name":"Bob","keep":2}],"meta":3}`,
-			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "1010"},
+			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "1010", false},
 		{"scalar wildcard", `{"items":[1,true,null,"hello"]}`,
-			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000"},
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
 		{"nested wildcard objects", `{"items":[{"id":"one"},{"id":"two"}]}`,
 			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
 		{"original wildcard", `{"items":[{"name":"Ann"},{"name":"Bob"}]}`,
-			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "0100"},
+			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "0100", false},
 		{"rename filtered path", `{"groups":[{"people":[{"name":"Eve","active":true},{"name":"Bob","active":false}]}]}`,
-			[]string{"groups[*].people[?(@.active == true)].name => selected"}, map[string]string{"selected": "text"}, "1010"},
+			[]string{"groups[*].people[?(@.active == true)].name => selected"}, map[string]string{"selected": "text"}, "1010", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newMapper(tc.rules, tc.fields, tc.mode)
