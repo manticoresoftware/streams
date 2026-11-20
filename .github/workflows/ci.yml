@@ -117,6 +117,27 @@ jobs:
         run: |
           docker build -t streams/worker:ci -f docker/worker/Dockerfile .
           docker image inspect --format 'Worker image size in bytes = {{.Size}}' streams/worker:ci
+      - name: Package JSLT audit test binary and Java reference
+        run: |
+          set -euo pipefail
+          docker build --target go-test -t streams/worker-go-test:ci -f docker/worker/Dockerfile .
+          mkdir -p jslt-audit/compat
+          worker=$(docker create streams/worker:ci)
+          docker cp "$worker:/usr/src/myapp/jslt-bundle.js" jslt-audit/jslt-bundle.js
+          docker cp "$worker:/usr/src/myapp/KafkaHandler.jar" jslt-audit/KafkaHandler.jar
+          docker cp "$worker:/usr/src/myapp/compat/." jslt-audit/compat/
+          docker rm "$worker"
+          test_container=$(docker create streams/worker-go-test:ci)
+          docker cp "$test_container:/worker.test" jslt-audit/worker.test
+          docker rm "$test_container"
+          chmod +x jslt-audit/worker.test
+          tar -czf jslt-audit.tar.gz -C jslt-audit .
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: ci-jslt-audit
+          path: jslt-audit.tar.gz
+          retention-days: 1
+          if-no-files-found: error
       - name: Archive validated image
         run: |
           set -euo pipefail
