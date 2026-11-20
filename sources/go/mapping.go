@@ -228,8 +228,9 @@ func javaWildcardText(value any) (string, bool) {
 	case bool, json.Number, int, int64, float64:
 		return fmt.Sprint(v), true
 	case []any, map[string]any:
-		b, err := json.Marshal(v)
-		return string(b), err == nil
+		// Jayway formats nested collections using Java Map/List.toString,
+		// not JSON. Keep using the oracle until that formatting is ported.
+		return "", false
 	default:
 		return "", false
 	}
