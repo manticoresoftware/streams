@@ -102,6 +102,40 @@ func TestJavaBridgeUnicodeProtocol(t *testing.T) {
 	assertSameJSON(t, got, input)
 }
 
+func TestStrictNativeMapper(t *testing.T) {
+	t.Setenv("STREAMS_NATIVE_ONLY", "1")
+	unsupported := newMapper([]string{"items..name => selected"}, map[string]string{"selected": "text"}, "1000")
+	if err := unsupported.requireNativeSupport(); err == nil || !strings.Contains(err.Error(), "hybrid worker") {
+		t.Fatalf("unsupported JSONPath was not rejected at startup: %v", err)
+	}
+	defer unsupported.reference.close()
+	if unsupported.reference.cmd != nil {
+		t.Fatal("strict native mode started Java while validating configuration")
+	}
+	mapper := newMapper([]string{"link => url"}, map[string]string{"url": "url"}, "1000")
+	defer mapper.reference.close()
+	if err := mapper.requireNativeSupport(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := mapper.transform(`{"link":"http://example.com:abc/path"}`); err == nil ||
+		!strings.Contains(err.Error(), "hybrid worker") {
+		t.Fatalf("runtime Java fallback was not clearly rejected: %v", err)
+	}
+	if mapper.reference.cmd != nil {
+		t.Fatal("strict native mode unexpectedly started Java")
+	}
+	ordinary := newMapper([]string{"title => title"}, map[string]string{"title": "text"}, "1000")
+	defer ordinary.reference.close()
+	if err := ordinary.requireNativeSupport(); err != nil {
+		t.Fatal(err)
+	}
+	_, output, err := ordinary.transform(`{"title":"ok"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameJSON(t, output, `{"title":"ok"}`)
+}
+
 func TestReferenceTransforms(t *testing.T) {
 	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
 		t.Skip("requires compiled StreamsCompat and the Java worker JAR")
