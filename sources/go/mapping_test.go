@@ -14,11 +14,18 @@ import (
 
 func assertSameJSON(t *testing.T, got, want string) {
 	t.Helper()
+	if !json.Valid([]byte(got)) || !json.Valid([]byte(want)) {
+		t.Fatalf("invalid JSON: got %s; want %s", got, want)
+	}
 	var a, b any
-	if err := json.Unmarshal([]byte(got), &a); err != nil {
+	gotDecoder := json.NewDecoder(strings.NewReader(got))
+	wantDecoder := json.NewDecoder(strings.NewReader(want))
+	gotDecoder.UseNumber()
+	wantDecoder.UseNumber()
+	if err := gotDecoder.Decode(&a); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal([]byte(want), &b); err != nil {
+	if err := wantDecoder.Decode(&b); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(a, b) {
