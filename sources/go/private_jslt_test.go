@@ -6,72 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 )
-
-// Report only a differing field path and value types, never production rule
-// text or output values. The optional audit runs outside public CI.
-func jsltDifferencePath(got, want any, path string) string {
-	if equivalentJSLTValue(got, want) {
-		return ""
-	}
-	switch a := got.(type) {
-	case string:
-		b, ok := want.(string)
-		if ok {
-			left, right := []rune(a), []rune(b)
-			for i := 0; i < len(left) && i < len(right); i++ {
-				if left[i] != right[i] {
-					return fmt.Sprintf("%s (string lengths %d/%d; first differing runes Goja U+%04X, Java U+%04X at %d)", path, len(left), len(right), left[i], right[i], i)
-				}
-			}
-			return fmt.Sprintf("%s (string lengths %d/%d)", path, len(left), len(right))
-		}
-	case map[string]any:
-		b, ok := want.(map[string]any)
-		if !ok {
-			break
-		}
-		keys := make([]string, 0, len(a)+len(b))
-		seen := make(map[string]bool)
-		for key := range a {
-			keys = append(keys, key)
-			seen[key] = true
-		}
-		for key := range b {
-			if !seen[key] {
-				keys = append(keys, key)
-			}
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			v, gotOK := a[key]
-			w, wantOK := b[key]
-			if !gotOK || !wantOK {
-				return path + "." + key + " (missing field)"
-			}
-			if diff := jsltDifferencePath(v, w, path+"."+key); diff != "" {
-				return diff
-			}
-		}
-	case []any:
-		b, ok := want.([]any)
-		if !ok {
-			break
-		}
-		if len(a) != len(b) {
-			return fmt.Sprintf("%s (array length %d vs %d)", path, len(a), len(b))
-		}
-		for i := range a {
-			if diff := jsltDifferencePath(a[i], b[i], fmt.Sprintf("%s[%d]", path, i)); diff != "" {
-				return diff
-			}
-		}
-	}
-	return fmt.Sprintf("%s (%T vs %T)", path, got, want)
-}
 
 // This optional test reads customer expressions only from a local file.
 // Neither the expressions nor any customer documents are committed to GitHub.
@@ -170,7 +107,7 @@ func TestPrivateJSLTCompilation(t *testing.T) {
 						}
 					}
 					if !equivalentJSLTValue(a, b) {
-						t.Errorf("synthetic input %d produced different output at %s", i, jsltDifferencePath(a, b, "$"))
+						t.Errorf("synthetic input %d produced different output", i)
 					}
 				}
 			}
