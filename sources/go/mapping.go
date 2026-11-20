@@ -18,9 +18,10 @@ import (
 )
 
 type mappingRule struct {
-	target string
-	isURL  bool
-	paths  []mappingPath
+	target   string
+	isURL    bool
+	hasType  bool
+	paths    []mappingPath
 }
 
 type mappingPath struct {
@@ -97,7 +98,8 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 			continue
 		}
 		target := strings.TrimSpace(parts[1])
-		r := mappingRule{target: target, isURL: fields[target] == "url"}
+		_, hasType := fields[target]
+		r := mappingRule{target: target, isURL: fields[target] == "url", hasType: hasType}
 		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 			p, ok := compileMappingPath(input)
 			if !ok && !strings.ContainsAny(input, "{}") &&
@@ -116,7 +118,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 					p.indefiniteAsScalar = !p.multi && javaCollectionSelector.MatchString(input)
 				}
 			}
-			if !ok || (fields[target] == "" && input != "whole_document") {
+			if !ok {
 				m.needsReference = true
 			}
 			r.paths = append(r.paths, p)
@@ -327,6 +329,18 @@ func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, b
 	return v, ok, true
 }
 
+// JsonTransformer catches ClassCastException/NullPointerException around the
+// entire mapping loop. On failure it returns the fields mapped *before* the
+// exception; outputDocs is the original input in no-transform modes, the
+// partial selection in original-field mode, or still empty in new-only mode.
+func (m *mapper) abortMapping(raw string, mapped, output map[string]any) (any, string, error) {
+	if m.output[2] == '1' {
+		return mapped, raw, nil
+	}
+	encoded, err := json.Marshal(output)
+	return mapped, string(encoded), err
+}
+
 func (m *mapper) transform(raw string) (any, string, error) {
 	if m.needsReference {
 		return m.referenceMap(raw)
@@ -385,6 +399,12 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				resolved := strings.ReplaceAll(strings.Join(keys, "."), "{}", key)
 				keys = strings.Split(resolved, ".")
 			}
+			// In Java, checkFieldType(...).equals("url") throws for a
+			// missing field type, even when the selected JSON path is absent.
+			// Preserve the already mapped fields without launching Java.
+			if !rule.hasType {
+				return m.abortMapping(raw, mapped, out)
+			}
 			if rule.isURL {
 				var v any
 				var exists bool
@@ -418,7 +438,12 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				}
 				if exists && v != nil {
 					s, ok := v.(string)
-					if !ok || !mapURLs(s, rule.target, mapped) {
+					if !ok {
+						// Java attempts to assign the JSONPath value to String.
+						// A non-string aborts the current document's mapping loop.
+						return m.abortMapping(raw, mapped, out)
+					}
+					if !mapURLs(s, rule.target, mapped) {
 						return m.referenceMap(raw)
 					}
 				}
