@@ -3,9 +3,8 @@ WORKDIR /build
 COPY sources/go/go.mod sources/go/go.sum ./
 RUN go mod download
 COPY sources/go/ ./
-RUN go mod tidy \
-    && curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o /build/jslt-bundle.js \
-    && sha256sum /build/jslt-bundle.js \
+RUN curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o /build/jslt-bundle.js \
+    && printf '%s  %s\n' ce1c69ad5dd4f7e82a69b7fa0b13926266606e3f3a4abd666f407c1e64dbb365 /build/jslt-bundle.js | sha256sum -c - \
     && CGO_ENABLED=0 go build -trimpath -o /streams-worker .
 
 FROM go-build AS go-test
@@ -46,5 +45,6 @@ COPY --from=compat-test /compat ./compat
 COPY --from=go-build /streams-worker ./
 COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
 COPY docker/worker/check.sh ./
+COPY sources/go/LICENSE.jslt-js ./LICENSE.jslt-js
 USER worker
 ENTRYPOINT ["/usr/src/myapp/streams-worker"]

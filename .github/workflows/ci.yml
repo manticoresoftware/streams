@@ -36,9 +36,7 @@ jobs:
         run: |
           curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o sources/go/jslt-bundle.js
           cd sources/go
-          go mod tidy
-          sha256sum jslt-bundle.js
-          grep -E '^(github.com/dop251/goja|github.com/dlclark/regexp2|github.com/go-sourcemap/sourcemap|github.com/google/pprof)' go.sum
+          printf '%s  %s\n' ce1c69ad5dd4f7e82a69b7fa0b13926266606e3f3a4abd666f407c1e64dbb365 jslt-bundle.js | sha256sum -c -
       - run: go test ./...
         working-directory: sources/go
         env:
