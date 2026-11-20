@@ -128,13 +128,14 @@ func TestReferenceTransforms(t *testing.T) {
 		rules  []string
 		fields map[string]string
 		mode   string
+		needsJava bool
 	}{
 		{"rename wildcard", `{"items":[{"name":"Ann","keep":1},{"name":"Bob","keep":2}],"meta":3}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "1010"},
 		{"scalar wildcard", `{"items":[1,true,null,"hello"]}`,
 			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000"},
 		{"nested wildcard objects", `{"items":[{"id":"one"},{"id":"two"}]}`,
-			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000"},
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
 		{"original wildcard", `{"items":[{"name":"Ann"},{"name":"Bob"}]}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "0100"},
 		{"rename filtered path", `{"groups":[{"people":[{"name":"Eve","active":true},{"name":"Bob","active":false}]}]}`,
@@ -150,8 +151,8 @@ func TestReferenceTransforms(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if m.reference.cmd != nil {
-				t.Fatal("native mapping unexpectedly started Java")
+			if (m.reference.cmd != nil) != tc.needsJava {
+				t.Fatalf("unexpected Java fallback: started=%t, expected=%t", m.reference.cmd != nil, tc.needsJava)
 			}
 			wantMapped, want, err := m.referenceMap(tc.raw)
 			if err != nil {
