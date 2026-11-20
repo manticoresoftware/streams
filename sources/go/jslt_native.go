@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	// Alpine runtime does not ship IANA timezone data by default. JSLT's
+	// format-time(..., zone) and parse-time(..., zone) need named locations.
+	_ "time/tzdata"
 
 	"github.com/dop251/goja"
 )
