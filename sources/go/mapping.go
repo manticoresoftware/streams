@@ -515,6 +515,26 @@ func decodedURIText(s string) (string, bool) {
 var escapeURIFragment = strings.NewReplacer("%", "%25", "#", "%23", "{", "%7B", "}", "%7D")
 var nonDNSName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// Go rejects nonnumeric URI ports at parse time. java.net.URI accepts the
+// authority but returns a null host; its path, query, and fragment still hash.
+// Parse those components under a neutral host and suppress hostname hashing.
+func parseURIInvalidPort(raw string) (*url.URL, bool) {
+	scheme, afterScheme, ok := strings.Cut(raw, "://")
+	if !ok || scheme == "" {
+		return nil, false
+	}
+	end := strings.IndexAny(afterScheme, "/?#")
+	if end < 0 {
+		end = len(afterScheme)
+	}
+	authority := afterScheme[:end]
+	if !strings.Contains(authority, ":") || strings.ContainsAny(authority, "[]") {
+		return nil, false
+	}
+	u, err := url.Parse(scheme + "://placeholder.invalid" + afterScheme[end:])
+	return u, err == nil
+}
+
 func mapURLs(text, target string, mapped map[string]any) bool {
 	for _, at := range linkPattern.FindAllStringSubmatchIndex(text, -1) {
 		raw := text[at[4]:at[5]]
@@ -523,10 +543,19 @@ func mapURLs(text, target string, mapped map[string]any) bool {
 			raw = escapeURIFragment.Replace(raw)
 			u, err = url.Parse(raw)
 		}
+		noHost := false
+		if err != nil && strings.Contains(err.Error(), "invalid port") {
+			if candidate, ok := parseURIInvalidPort(raw); ok {
+				u, err, noHost = candidate, nil, true
+			}
+		}
 		if err != nil {
 			return false
 		}
 		host := u.Hostname()
+		if noHost {
+			host = ""
+		}
 		if port := u.Port(); port != "" {
 			if _, err := strconv.ParseUint(port, 10, 31); err != nil {
 				// java.net.URI.getHost returns null when the port does
