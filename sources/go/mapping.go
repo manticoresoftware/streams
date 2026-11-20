@@ -102,6 +102,38 @@ func compileMappingPath(text string) (mappingPath, bool) {
 	return p, true
 }
 
+// JsonTransformer asks Jayway for String even when ".." returns a
+// JSONArray. Java catches the resulting ClassCastException and leaves that
+// selection empty. The subset below is safe to skip without Java or an
+// actual recursive search. Other descendant syntaxes keep the fallback.
+func compileSkippedDescendantPath(input string) (mappingPath, bool) {
+	p := mappingPath{wildcard: -1, indefiniteAsScalar: true}
+	if strings.ContainsAny(input, "[]{}") {
+		return p, false
+	}
+	if strings.HasPrefix(input, ".") && !strings.HasPrefix(input, "..") {
+		p.keys = strings.Split(input, ".")
+		if len(p.keys) == 2 && simpleKey.MatchString(p.keys[1]) {
+			return p, true
+		}
+		return p, false
+	}
+	if strings.Count(input, "..") != 1 || strings.Contains(input, "...") ||
+		strings.HasPrefix(input, "..") || strings.HasSuffix(input, "..") {
+		return p, false
+	}
+	p.keys = strings.Split(input, ".")
+	for i, key := range p.keys {
+		if key == "" && i > 0 && i < len(p.keys)-1 {
+			continue
+		}
+		if !simpleKey.MatchString(key) {
+			return p, false
+		}
+	}
+	return p, true
+}
+
 func newMapper(rules []string, fields map[string]string, output string) *mapper {
 	cfg, _ := json.Marshal(struct {
 		Rules  []string          `json:"rules"`
@@ -133,6 +165,11 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 				if expression, err := jp.ParseString(path); err == nil {
 					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
 					p.indefiniteAsScalar = !p.multi && javaCollectionSelector.MatchString(input)
+				}
+			}
+			if !ok && fields[target] != "url" {
+				if recursive, skipped := compileSkippedDescendantPath(input); skipped {
+					p, ok = recursive, true
 				}
 			}
 			if !ok {
@@ -477,7 +514,10 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			}
 			var text string
 			var found, compatible bool
-			if path.advanced != nil {
+			if path.indefiniteAsScalar {
+				// Jayway produces an array that Java cannot assign to String.
+				text, found, compatible = "", false, true
+			} else if path.advanced != nil {
 				text, found, compatible = selectAdvancedMappedValue(doc, path)
 			} else {
 				text, found, compatible = selectMappedValue(doc, keys, path.wildcard)
