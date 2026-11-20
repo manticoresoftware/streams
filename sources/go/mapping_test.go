@@ -147,6 +147,14 @@ func TestReferenceTransforms(t *testing.T) {
 		mode   string
 		needsJava bool
 	}{
+		{"indexed URL path", `{"links":[{"url":"https://example.com/a"},{"url":"https://other.example.com/b"}]}`,
+			[]string{"links[0].url => link"}, map[string]string{"link": "url"}, "1000", false},
+		{"second indexed URL path", `{"links":[{"url":"https://example.com/a"},{"url":"https://other.example.com/b?x=1"}]}`,
+			[]string{"links[1].url => link"}, map[string]string{"link": "url"}, "1000", false},
+		{"missing indexed URL path", `{"links":[{"url":"https://example.com/a"}]}`,
+			[]string{"links[10].url => link"}, map[string]string{"link": "url"}, "1000", false},
+		{"indexed URL passthrough mode", `{"links":[{"url":"https://example.com/a"}]}`,
+			[]string{"links[0].url => link"}, map[string]string{"link": "url"}, "0010", false},
 		{"rename wildcard", `{"items":[{"name":"Ann","keep":1},{"name":"Bob","keep":2}],"meta":3}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "1010", false},
 		{"scalar wildcard", `{"items":[1,true,null,"hello"]}`,
