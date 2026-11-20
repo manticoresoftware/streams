@@ -395,7 +395,19 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					v, exists = lookupMappedPath(doc, keys)
 				}
 				if path.wildcard >= 0 {
-					return m.referenceMap(raw)
+					// The old URL branch reads a Jayway JSONArray into String,
+					// causing ClassCastException. Unlike text rules, that
+					// exception aborts the entire mapping loop. Missing paths
+					// throw PathNotFoundException and processing continues.
+					if _, present := lookupMappedPath(doc, keys[:path.wildcard+1]); present {
+						if m.output[2] == '1' {
+							return mapped, raw, nil
+						}
+						b, err := json.Marshal(out)
+						return mapped, string(b), err
+						}
+					value = ""
+					continue
 				}
 				if exists && v != nil {
 					s, ok := v.(string)
