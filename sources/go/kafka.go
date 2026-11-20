@@ -146,6 +146,9 @@ func kafkaFetchOptions(c config) []kgo.Opt {
 
 func runWorker(ctx context.Context, c config, m *metrics) error {
 	mapper := newMapper(c.rules, c.fields, c.output)
+	if err := mapper.requireNativeSupport(); err != nil {
+		return err
+	}
 	jslt, err := newJSLT(c.jslt)
 	if err != nil {
 		return fmt.Errorf("compile JSLT: %w", err)
