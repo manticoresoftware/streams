@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"context"
+	"os/exec"
 	"os"
 	"reflect"
 	"strings"
@@ -127,6 +129,24 @@ func TestReferenceTransforms(t *testing.T) {
 	}
 }
 
+// Match mb_strtolower in the Java image, including contextual and multi-rune
+// mappings. Only exceptional batches need the persistent PHP process.
+var mbLower = &referenceProcess{command: func(ctx context.Context) *exec.Cmd {
+	return exec.CommandContext(ctx, "php", "-r", `
+fgets(STDIN);
+echo "{\"data\":\"\"}\n";
+while (($line = fgets(STDIN)) !== false) {
+    try {
+        $text = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+        $reply = ['data' => mb_strtolower($text, 'UTF-8')];
+    } catch (Throwable $e) {
+        $reply = ['error' => $e->getMessage()];
+    }
+    echo json_encode($reply, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), "\n";
+}`)
+}}
+
+
 func TestPHPUnicodeParity(t *testing.T) {
 	if os.Getenv("STREAMS_TEST_MBSTRING") != "1" {
 		t.Skip("requires PHP 8.5 mbstring")
@@ -166,7 +186,7 @@ func TestPHPUnicodeParity(t *testing.T) {
 		chunk.Reset()
 	}
 	for r := rune(0); r <= unicode.MaxRune; r++ {
-		if utf8.ValidRune(r) && !requiresMBLower(r) {
+		if utf8.ValidRune(r) {
 			chunk.WriteRune(r)
 		}
 		if chunk.Len() >= 32768 {

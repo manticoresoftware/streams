@@ -17,8 +17,9 @@ RUN mvn -B -q compile assembly:single \
 COPY sources/go/compat/StreamsCompat.java /tmp/StreamsCompat.java
 RUN mkdir /compat && javac -cp /KafkaHandler.jar -d /compat /tmp/StreamsCompat.java
 
-FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
+FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2 AS compat-test
 
+# PHP is only needed in the build-time parity test; it is not in the worker image.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends software-properties-common \
     && add-apt-repository -y ppa:ondrej/php \
@@ -26,15 +27,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends php8.5-cli php8.5-mbstring \
     && php -r 'if (PHP_VERSION_ID < 80512 || PHP_VERSION_ID >= 80600) exit(1);' \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=compat-build /KafkaHandler.jar /KafkaHandler.jar
+COPY --from=compat-build /compat /compat
+RUN --mount=type=bind,from=go-test,source=/worker.test,target=/tmp/worker.test \
+    STREAMS_COMPAT_CLASSPATH=/compat:/KafkaHandler.jar \
+    STREAMS_TEST_MBSTRING=1 /tmp/worker.test -test.v -test.run '^(TestReferenceTransforms|TestPHPUnicodeParity)$'
 
+FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
 RUN groupadd -r worker && useradd -r -g worker worker
 WORKDIR /usr/src/myapp
-COPY --from=compat-build /KafkaHandler.jar ./
-COPY --from=compat-build /compat ./compat
+COPY --from=compat-test /KafkaHandler.jar ./
+COPY --from=compat-test /compat ./compat
 COPY --from=go-build /streams-worker ./
 COPY docker/worker/check.sh ./
 USER worker
-RUN --mount=type=bind,from=go-test,source=/worker.test,target=/tmp/worker.test \
-    STREAMS_COMPAT_CLASSPATH=/usr/src/myapp/compat:/usr/src/myapp/KafkaHandler.jar \
-    STREAMS_TEST_MBSTRING=1 /tmp/worker.test -test.v -test.run '^(TestReferenceTransforms|TestPHPUnicodeParity)$'
 ENTRYPOINT ["/usr/src/myapp/streams-worker"]

@@ -11,7 +11,9 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"unicode"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // referenceProcess starts lazily and reuses the same interpreter and compiled
@@ -104,40 +106,9 @@ func newJSLT(config string) (func(string) (string, error), error) {
 	return javaReference("jslt", config).call, nil
 }
 
-// Match mb_strtolower in the Java image, including contextual and multi-rune
-// mappings. Only exceptional batches need the persistent PHP process.
-var mbLower = &referenceProcess{command: func(ctx context.Context) *exec.Cmd {
-	return exec.CommandContext(ctx, "php", "-r", `
-fgets(STDIN);
-echo "{\"data\":\"\"}\n";
-while (($line = fgets(STDIN)) !== false) {
-    try {
-        $text = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
-        $reply = ['data' => mb_strtolower($text, 'UTF-8')];
-    } catch (Throwable $e) {
-        $reply = ['error' => $e->getMessage()];
-    }
-    echo json_encode($reply, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), "\n";
-}`)
-}}
-
-// These are the differences between Go's simple Unicode 15 lowercase tables
-// and PHP 8.5 mbstring (plus contextual Greek sigma). Defer non-ASCII to PHP
-// if the toolchain changes tables until the parity test has been rerun.
-func requiresMBLower(r rune) bool {
-	if r < 0x80 {
-		return false
-	}
-	return unicode.Version != "15.0.0" || r == 'İ' || r == 'Σ' || r == 0x1c89 ||
-		(r >= 0xa7cb && r <= 0xa7dc) || (r >= 0x10d50 && r <= 0x10d65) ||
-		(r >= 0x16ea0 && r <= 0x16eb8)
-}
-
+// Use Unicode full lowercase mappings and contextual rules, including Greek
+// final sigma and multi-rune mappings. Instantiate a caser for each batch;
+// a Caser is stateful and must not be shared across concurrent calls.
 func lowerBatch(text string) (string, error) {
-	for _, r := range text {
-		if requiresMBLower(r) {
-			return mbLower.call(text)
-		}
-	}
-	return strings.ToLower(text), nil
+	return cases.Lower(language.Und).String(text), nil
 }
