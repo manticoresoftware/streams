@@ -140,6 +140,8 @@ jobs:
           docker build --target native-runtime -t streams/worker-native:ci -f docker/worker/Dockerfile .
           docker image inspect --format 'JVM-free worker image size in bytes = {{.Size}}' streams/worker-native:ci
           docker tag streams/worker-native:ci streams/worker:ci
+      - name: Verify timezone support inside minimal Alpine image
+        run: docker build --target native-test -t streams/worker-native-test:ci -f docker/worker/Dockerfile .
       - name: Archive validated image
         run: |
           set -euo pipefail
