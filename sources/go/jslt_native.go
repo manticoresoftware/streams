@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/url"
