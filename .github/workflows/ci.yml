@@ -34,14 +34,20 @@ jobs:
           cache-dependency-path: sources/go/go.sum
       - run: go test ./...
         working-directory: sources/go
-      # A non-blocking compatibility experiment; it does not alter the worker.
-      - name: Probe JVM-free JSLT in an embedded Go JavaScript runtime
+      # No customer expressions/documents are checked in. All fixtures are invented.
+      - name: Compare synthetic JSLT features with the Java reference
         continue-on-error: true
         run: |
-          curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.min.js -o jslt-bundle.js
+          set -euo pipefail
+          mvn -B -q -DskipTests -f sources/src/pom.xml compile assembly:single
+          worker_jar=$(find sources/src/target -maxdepth 1 -name '*-jar-with-dependencies.jar' -print -quit)
+          test -n "$worker_jar"
+          mkdir -p /tmp/streams-jslt-compat
+          javac -cp "$worker_jar" -d /tmp/streams-jslt-compat sources/go/compat/StreamsCompat.java
+          curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o sources/jslt-poc/jslt-bundle.js
+          cd sources/jslt-poc
           go mod tidy
-          go run .
-        working-directory: sources/jslt-poc
+          JSLT_REFERENCE_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" go run .
 
   image-build:
     needs: worker-tests
