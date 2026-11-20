@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -125,8 +126,18 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 	return m
 }
 
+func (m *mapper) requireNativeSupport() error {
+	if os.Getenv("STREAMS_NATIVE_ONLY") == "1" && m.needsReference {
+		return fmt.Errorf("configured JSON mapping requires the Java compatibility bridge; use the hybrid worker image")
+	}
+	return nil
+}
+
 func (m *mapper) referenceMap(raw string) (any, string, error) {
 	m.referenceCalls.Add(1)
+	if os.Getenv("STREAMS_NATIVE_ONLY") == "1" {
+		return nil, "", fmt.Errorf("document requires unsupported Java mapping compatibility; use the hybrid worker image")
+	}
 	data, err := m.reference.call(raw)
 	if err != nil {
 		return nil, "", err
