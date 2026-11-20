@@ -309,6 +309,9 @@ jobs:
       - name: Report Go worker startup and verify health endpoints
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/report-worker-startup.sh
+      - name: Measure JVM-free worker memory at readiness
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-memory.sh readiness
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/capture-kafka-start-offsets.sh
@@ -321,6 +324,9 @@ jobs:
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/verify-kafka-processing.sh
+      - name: Measure JVM-free worker memory after Kafka
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-memory.sh after-kafka
       - name: Collect diagnostics
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         run: bash .github/scripts/k8s/collect-diagnostics.sh artifacts/k8s
