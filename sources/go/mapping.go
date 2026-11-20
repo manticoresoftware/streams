@@ -227,10 +227,34 @@ func javaWildcardText(value any) (string, bool) {
 		return v, true
 	case bool, json.Number, int, int64, float64:
 		return fmt.Sprint(v), true
-	case []any, map[string]any:
-		// Jayway formats nested collections using Java Map/List.toString,
-		// not JSON. Keep using the oracle until that formatting is ported.
-		return "", false
+	case []any:
+		// json-smart's JSONArray.toString produces compact JSON, not the
+		// output of java.util.List.toString.
+		var b strings.Builder
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(v); err != nil {
+			return "", false
+		}
+		return strings.TrimSuffix(b.String(), "\n"), true
+	case map[string]any:
+		// Jayway's map stringification differs from JSON serialization.
+		// Single-key objects can be represented without relying on Java's
+		// multi-key map iteration order.
+		if len(v) == 0 {
+			return "{}", true
+		}
+		if len(v) != 1 {
+			return "", false
+		}
+		for key, item := range v {
+			text, ok := javaWildcardText(item)
+			if !ok {
+				return "", false
+			}
+			return "{" + key + "=" + text + "}", true
+		}
+		return "{}", true
 	default:
 		return "", false
 	}
@@ -248,7 +272,10 @@ func selectMappedValue(root map[string]any, keys []string, wildcard int) (text s
 		s, ok := v.(string)
 		return s, ok, true
 	}
-	v, _ := lookupMappedPath(root, keys[:wildcard+1])
+	v, exists := lookupMappedPath(root, keys[:wildcard+1])
+	if !exists {
+		return "", false, true
+	}
 	items, isArray := v.([]any)
 	if !isArray {
 		return "", false, false
@@ -337,15 +364,25 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					continue
 				}
 				key, ok := v.(string)
-				if !ok || !simpleKey.MatchString(key) {
-					return m.referenceMap(raw)
-				}
-				keys = append([]string(nil), keys...)
-				for i := range keys {
-					if keys[i] == "{}" {
-						keys[i] = key
+				if !ok {
+					// Java substitutes the string form of scalar selector values.
+					switch v := v.(type) {
+					case json.Number, bool:
+						key = fmt.Sprint(v)
+					default:
+						return m.referenceMap(raw)
 					}
 				}
+				// A dot in the substituted value is another path segment in
+				// Jayway, not a literal key containing a dot.
+				segments := strings.Split(key, ".")
+				for _, segment := range segments {
+					if !simpleKey.MatchString(segment) {
+						return m.referenceMap(raw)
+					}
+				}
+				resolved := strings.ReplaceAll(strings.Join(keys, "."), "{}", key)
+				keys = strings.Split(resolved, ".")
 			}
 			if rule.isURL {
 				v, exists := lookupMappedPath(doc, keys)
