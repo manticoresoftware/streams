@@ -95,8 +95,10 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		r := mappingRule{target: target, isURL: fields[target] == "url"}
 		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 			p, ok := compileMappingPath(input)
-			if !ok && output[1] != '1' && !strings.ContainsAny(input, "{}") &&
-				(fields[target] != "url" || (!strings.Contains(input, "[*]") && !strings.Contains(input, "[?(") && !strings.Contains(input, ".."))) {
+			if !ok && !strings.ContainsAny(input, "{}") &&
+				!strings.Contains(input, "..") &&
+				!(strings.Contains(input, "[?(") && !strings.Contains(input, "[*]")) &&
+				(fields[target] != "url" || (!strings.Contains(input, "[*]") && !strings.Contains(input, "[?("))) {
 				// Evaluate advanced paths in Go, preserving the mapping rules as
 				// configured in the Java worker (relative paths use $. prefix).
 				path := strings.TrimSpace(input)
