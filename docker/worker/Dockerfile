@@ -37,6 +37,20 @@ RUN --mount=type=bind,from=go-test,source=/worker.test,target=/tmp/worker.test \
     STREAMS_COMPAT_CLASSPATH=/compat:/KafkaHandler.jar \
     STREAMS_TEST_MBSTRING=1 /tmp/worker.test -test.v -test.run '^(TestReferenceTransforms|TestPHPUnicodeParity)$'
 
+# CI-only JVM-free candidate. Keep the hybrid image below as the
+# deployment default until unsupported mapping rules are ported.
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS native-runtime
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S worker \
+    && adduser -S -G worker worker
+WORKDIR /usr/src/myapp
+COPY --from=go-build /streams-worker ./streams-worker
+COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
+COPY docker/worker/check.sh ./
+COPY sources/go/LICENSE.jslt-js ./LICENSE.jslt-js
+USER worker
+ENTRYPOINT ["/usr/src/myapp/streams-worker"]
+
 FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
 RUN groupadd -r worker && useradd -r -g worker worker
 WORKDIR /usr/src/myapp
