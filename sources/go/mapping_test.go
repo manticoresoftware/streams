@@ -269,6 +269,9 @@ func TestReferenceTransforms(t *testing.T) {
 	}
 
 	for _, link := range []string{
+		"http://example.com:2147483647/path", "http://example.com:2147483648/path",
+		"http://example.com:999999999999999/path?x=1", "http://example.com:65536/path",
+		"http://example.com:/path",
 		"http://foo.12345/path", "http://bad_host.example.com/", "http://a..b.com/x",
 		"http://example.com/p?q=%23tag#first#second",
 		"http://example.com/%BD%E3%BD%E3%CE%D2%B6%E9%C2%E4%C1%CB/",
