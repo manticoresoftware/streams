@@ -135,6 +135,11 @@ jobs:
           path: jslt-audit.tar.gz
           retention-days: 1
           if-no-files-found: error
+      - name: Build JVM-free image for Kubernetes E2E
+        run: |
+          docker build --target native-runtime -t streams/worker-native:ci -f docker/worker/Dockerfile .
+          docker image inspect --format 'JVM-free worker image size in bytes = {{.Size}}' streams/worker-native:ci
+          docker tag streams/worker-native:ci streams/worker:ci
       - name: Archive validated image
         run: |
           set -euo pipefail
