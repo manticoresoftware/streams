@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -107,7 +106,7 @@ func TestPrivateJSLTCompilation(t *testing.T) {
 							delete(a, field); delete(b, field)
 						}
 					}
-					if !reflect.DeepEqual(a, b) {
+					if !equivalentJSLTValue(a, b) {
 						t.Errorf("synthetic input %d produced different output", i)
 					}
 				}
