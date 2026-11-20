@@ -25,6 +25,7 @@ type mappingRule struct {
 type mappingPath struct {
 	advanced jp.Expr
 	multi bool
+	indefiniteAsScalar bool
 	keys        []string
 	wildcard    int
 	placeholder string
@@ -41,6 +42,9 @@ type mapper struct {
 }
 
 var simpleKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// Jayway returns collections for filter, slice and union selectors. When the
+// rule lacks [*], Java tries to assign them to String and skips that value.
+var javaCollectionSelector = regexp.MustCompile(`\[\?\(|\[(?:[0-9]*:[0-9]*|[0-9]+(?:,[0-9]+)+)\]`)
 
 // Compile the common mapping grammar once. Custom JSONPath expressions use the
 // installed Jayway implementation so filters, functions and quoted keys keep
@@ -97,7 +101,6 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 			p, ok := compileMappingPath(input)
 			if !ok && !strings.ContainsAny(input, "{}") &&
 				!strings.Contains(input, "..") &&
-				!(strings.Contains(input, "[?(") && !strings.Contains(input, "[*]")) &&
 				(fields[target] != "url" || (!strings.Contains(input, "[*]") && !strings.Contains(input, "[?("))) {
 				// Evaluate advanced paths in Go, preserving the mapping rules as
 				// configured in the Java worker (relative paths use $. prefix).
@@ -109,6 +112,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 				}
 				if expression, err := jp.ParseString(path); err == nil {
 					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
+					p.indefiniteAsScalar = !p.multi && javaCollectionSelector.MatchString(input)
 				}
 			}
 			if !ok || (fields[target] == "" && input != "whole_document") {
@@ -285,6 +289,11 @@ func selectMappedValue(root map[string]any, keys []string, wildcard int) (text s
 // A wildcard returns a newline-delimited list, while a definite path must
 // return a string (or null). Unsupported result types use the Java oracle.
 func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, bool, bool) {
+	if path.indefiniteAsScalar {
+		// Without [*] the legacy mapper catches ClassCastException from
+		// Jayway's JSONArray result. It does not add a mapped value.
+		return "", false, true
+	}
 	values := path.advanced.Get(root)
 	if path.multi {
 		var b strings.Builder
