@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ohler55/ojg/jp"
 )
 
 type mappingRule struct {
@@ -20,6 +22,8 @@ type mappingRule struct {
 }
 
 type mappingPath struct {
+	advanced jp.Expr
+	multi bool
 	keys        []string
 	wildcard    int
 	placeholder string
@@ -89,6 +93,20 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		r := mappingRule{target: target, isURL: fields[target] == "url"}
 		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 			p, ok := compileMappingPath(input)
+			if !ok && fields[target] != "url" && output[1] != '1' &&
+				!(output[0] == '1' && output[2] == '1') && !strings.ContainsAny(input, "{}") {
+				// Evaluate advanced paths in Go, preserving the mapping rules as
+				// configured in the Java worker (relative paths use $. prefix).
+				path := strings.TrimSpace(input)
+				if strings.HasPrefix(path, "[") {
+					path = "$" + path
+				} else {
+					path = "$." + path
+				}
+				if expression, err := jp.ParseString(path); err == nil {
+					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
+				}
+			}
 			if !ok || (fields[target] == "" && input != "whole_document") ||
 				(output[0] == '1' && output[2] == '1' && p.wildcard >= 0) {
 				m.needsReference = true
@@ -209,6 +227,45 @@ func selectMappedValue(root map[string]any, keys []string, wildcard int) (text s
 	return s.String(), true, true
 }
 
+// selectAdvancedMappedValue reproduces the worker's Jayway-to-string mapping.
+// A wildcard returns a newline-delimited list, while a definite path must
+// return a string (or null). Unsupported result types use the Java oracle.
+func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, bool, bool) {
+	values := path.advanced.Get(root)
+	if path.multi {
+		var b strings.Builder
+		for _, v := range values {
+			switch v := v.(type) {
+			case nil:
+				b.WriteString("null")
+			case string:
+				b.WriteString(v)
+			case bool:
+				fmt.Fprint(&b, v)
+			case json.Number:
+				b.WriteString(v.String())
+			case float64, int, int64:
+				fmt.Fprint(&b, v)
+			default:
+				return "", false, false
+			}
+			b.WriteByte('\\n')
+		}
+		return b.String(), true, true
+	}
+	if len(values) == 0 {
+		return "", false, true
+	}
+	if len(values) != 1 {
+		return "", false, false
+	}
+	if values[0] == nil {
+		return "null", true, true
+	}
+	v, ok := values[0].(string)
+	return v, ok, true
+}
+
 func (m *mapper) transform(raw string) (any, string, error) {
 	if m.needsReference {
 		return m.referenceMap(raw)
@@ -276,7 +333,13 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				last = append([]string(nil), keys...)
 				last[path.wildcard] += "[*]"
 			}
-			text, found, compatible := selectMappedValue(doc, keys, path.wildcard)
+			var text string
+			var found, compatible bool
+			if path.advanced != nil {
+				text, found, compatible = selectAdvancedMappedValue(doc, path)
+			} else {
+				text, found, compatible = selectMappedValue(doc, keys, path.wildcard)
+			}
 			if !compatible {
 				return m.referenceMap(raw)
 			}

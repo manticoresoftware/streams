@@ -99,10 +99,13 @@ func TestReferenceTransforms(t *testing.T) {
 	}
 	complex := newMapper([]string{"groups[*].people[?(@.active == true)].name => selected", "['user.name'] => name"},
 		map[string]string{"selected": "text", "name": "text"}, "1000")
-	if !complex.needsReference {
-		t.Fatal("advanced Jayway expression did not select reference evaluator")
+	if complex.needsReference {
+		t.Fatal("advanced paths should use native JSONPath")
 	}
 	_, got, err := complex.transform(`{"user.name":"reader","groups":[{"people":[{"name":"Eve","active":true},{"name":"Bob","active":false}]}]}`)
+	if complex.reference.cmd != nil {
+		t.Fatal("advanced JSONPath unexpectedly started Java")
+	}
 	defer complex.reference.close()
 	if err != nil {
 		t.Fatal(err)
