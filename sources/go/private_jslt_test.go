@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,12 @@ func TestPrivateJSLTCompilation(t *testing.T) {
 	rows := re.FindAllStringSubmatch(string(data), -1)
 	if len(rows) != 6 {
 		t.Fatalf("expected 6 saved process rules, found %d", len(rows))
+	}
+	fixtures := map[string][]json.RawMessage{}
+	if path := os.Getenv("STREAMS_PRIVATE_JSLT_FIXTURES"); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil { t.Fatal(err) }
+		if err := json.Unmarshal(b, &fixtures); err != nil { t.Fatal(err) }
 	}
 	for _, row := range rows {
 		name := row[1] + "-" + row[2]
@@ -64,6 +71,38 @@ func TestPrivateJSLTCompilation(t *testing.T) {
 			stdin.Close()
 			if err := cmd.Wait(); err != nil {
 				t.Errorf("Java reference ended: %v", err)
+			}
+			if len(fixtures[row[2]]) > 0 {
+				native, err := newJSLT(expression)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reference := javaReference("jslt", expression)
+				defer reference.close()
+				for i, doc := range fixtures[row[2]] {
+					got, goErr := native(string(doc))
+					want, javaErr := reference.call(string(doc))
+					if goErr != nil || javaErr != nil {
+						t.Errorf("synthetic input %d failed: Goja=%v Java=%v", i, goErr, javaErr)
+						continue
+					}
+					var a, b map[string]any
+					if json.Unmarshal([]byte(got), &a) != nil || json.Unmarshal([]byte(want), &b) != nil {
+						t.Errorf("synthetic input %d produced invalid JSON", i)
+						continue
+					}
+					switch row[2] {
+					case "video-processing":
+						delete(a, "Inserted"); delete(b, "Inserted")
+					case "boards-processing":
+						for _, field := range []string{"Inserted", "Updated", "InsertedTs"} {
+							delete(a, field); delete(b, field)
+						}
+					}
+					if !reflect.DeepEqual(a, b) {
+						t.Errorf("synthetic input %d produced different output", i)
+					}
+				}
 			}
 		})
 	}
