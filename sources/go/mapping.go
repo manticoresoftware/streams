@@ -29,6 +29,7 @@ type mappingPath struct {
 	advanced jp.Expr
 	multi bool
 	indefiniteAsScalar bool
+	rawWildcardSteps []rawWildcardStep
 	urlCollectionPrefix []string
 	urlCollectionArrayOnly bool
 	keys        []string
@@ -218,6 +219,11 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 				if expression, err := jp.ParseString(path); err == nil {
 					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
 					p.indefiniteAsScalar = !p.multi && javaCollectionSelector.MatchString(input)
+				}
+			}
+			if !r.isURL && p.advanced != nil && p.multi {
+				if steps, supported := compileRawWildcardSteps(input); supported {
+					p.rawWildcardSteps = steps
 				}
 			}
 			if fields[target] == "url" {
@@ -588,6 +594,8 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			if path.indefiniteAsScalar {
 				// Jayway produces an array that Java cannot assign to String.
 				text, found, compatible = "", false, true
+			} else if len(path.rawWildcardSteps) > 0 {
+				text, found, compatible = selectRawNestedWildcards(raw, path.rawWildcardSteps)
 			} else if path.advanced != nil {
 				text, found, compatible = selectAdvancedMappedValue(doc, path)
 			} else {
