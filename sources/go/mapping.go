@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/ohler55/ojg/jp"
@@ -47,6 +48,22 @@ var simpleKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // Jayway returns collections for filter, slice and union selectors. When the
 // rule lacks [*], Java tries to assign them to String and skips that value.
 var javaCollectionSelector = regexp.MustCompile(`\[\?\(|\[(?:[0-9]*:[0-9]*|[0-9]+(?:,[0-9]+)+)\]`)
+
+// Jayway accepts Unicode letters in unquoted JSONPath keys, even though
+// the simple compile-time mapping grammar uses ASCII keys. Keep JSONPath
+// metacharacters on the compatibility path.
+func nativeDynamicPathSegment(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r == '_' || r == '-' || unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
 
 // Compile the common mapping grammar once. Custom JSONPath expressions use the
 // installed Jayway implementation so filters, functions and quoted keys keep
@@ -384,6 +401,9 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					switch v := v.(type) {
 					case json.Number, bool:
 						key = fmt.Sprint(v)
+					case nil:
+						// In Java, null.toString() aborts the mapping loop.
+						return m.abortMapping(raw, mapped, out)
 					default:
 						return m.referenceMap(raw)
 					}
@@ -392,7 +412,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				// Jayway, not a literal key containing a dot.
 				segments := strings.Split(key, ".")
 				for _, segment := range segments {
-					if !simpleKey.MatchString(segment) {
+					if !nativeDynamicPathSegment(segment) {
 						return m.referenceMap(raw)
 					}
 				}
