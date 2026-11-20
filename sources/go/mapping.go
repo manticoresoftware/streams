@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/ohler55/ojg/jp"
@@ -34,6 +35,7 @@ type mapper struct {
 	rules                  []mappingRule
 	output                 string
 	reference              *referenceProcess
+	referenceCalls         atomic.Uint64
 	needsReference         bool
 	passThroughWithoutRule bool
 }
@@ -118,6 +120,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 }
 
 func (m *mapper) referenceMap(raw string) (any, string, error) {
+	m.referenceCalls.Add(1)
 	data, err := m.reference.call(raw)
 	if err != nil {
 		return nil, "", err
