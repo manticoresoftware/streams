@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/url"
 	"os"
 	"regexp"
@@ -128,6 +131,81 @@ func installJSLTHost(vm *goja.Runtime) error {
 	return err
 }
 
+// Java/Jackson preserves integer JSON nodes beyond the 53-bit JS Number limit.
+// jslt-js already supports BigIntegerNode via BigInt, but its readTree(JSON text)
+// passes through JSON.parse and loses those digits. Quote only unsafe integer
+// tokens (never strings), then restore them as BigInts in JSON.parse's reviver.
+var maxSafeJSLTInteger = big.NewInt(9007199254740991)
+
+func protectJSLTIntegers(input string) (string, map[string]string, error) {
+	var output strings.Builder
+	output.Grow(len(input))
+	var replacements map[string]string
+	var nonce string
+	inString, escaped := false, false
+	for i := 0; i < len(input); {
+		c := input[i]
+		if inString {
+			output.WriteByte(c)
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			i++
+			continue
+		}
+		if c == '"' {
+			inString = true
+			output.WriteByte(c)
+			i++
+			continue
+		}
+		if c != '-' && (c < '0' || c > '9') {
+			output.WriteByte(c)
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(input) {
+			n := input[end]
+			if n < '0' || n > '9' {
+				if n != '.' && n != 'e' && n != 'E' && n != '+' && n != '-' {
+					break
+				}
+			}
+			end++
+		}
+		text := input[i:end]
+		// Floating-point numbers continue to use JS Number, like the old
+		// engine. Preserve only integral tokens that would lose precision.
+		if !strings.ContainsAny(text, ".eE+") {
+			integer, ok := new(big.Int).SetString(text, 10)
+			if ok && (integer.Cmp(maxSafeJSLTInteger) > 0 ||
+				integer.Cmp(new(big.Int).Neg(maxSafeJSLTInteger)) < 0) {
+				if replacements == nil {
+					seed := make([]byte, 16)
+					if _, err := rand.Read(seed); err != nil {
+						return "", nil, fmt.Errorf("generate JSLT number marker: %w", err)
+					}
+					nonce = hex.EncodeToString(seed)
+					replacements = make(map[string]string)
+				}
+				marker := "\x00streams-int-" + nonce + "-" + strconv.Itoa(len(replacements))
+				replacements[marker] = text
+				output.WriteString(strconv.Quote(marker))
+				i = end
+				continue
+			}
+		}
+		output.WriteString(text)
+		i = end
+	}
+	return output.String(), replacements, nil
+}
+
 func newJSLT(config string) (func(string) (string, error), error) {
 	if strings.TrimSpace(config) == "" {
 		return nil, nil
@@ -157,7 +235,14 @@ func newJSLT(config string) (func(string) (string, error), error) {
 	if _, err := vm.RunString("globalThis.__streamsCompiledJSLT = JSLT.compile(__streamsJSLTSource, 'streams.jslt');"); err != nil {
 		return nil, fmt.Errorf("compile JSLT: %w", err)
 	}
-	fn, err := vm.RunString("(function(input) { return JSON.stringify(JSLT.toJS(__streamsCompiledJSLT.applyInput(JSLT.readTree(input)))); })")
+	fn, err := vm.RunString(`(function(input, integers) {
+		const parsed = JSON.parse(input, function(_key, value) {
+			return typeof value === "string" && Object.prototype.hasOwnProperty.call(integers, value)
+				? BigInt(integers[value]) : value;
+		});
+		const result = __streamsCompiledJSLT.applyInput(JSLT.fromJS(parsed));
+		return result == null ? "null" : result.toString();
+	})`)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +257,14 @@ func newJSLT(config string) (func(string) (string, error), error) {
 func (p *jsltEngine) transform(input string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	value, err := p.apply(goja.Undefined(), p.vm.ToValue(input))
+	prepared, replacements, err := protectJSLTIntegers(input)
+	if err != nil {
+		return "", err
+	}
+	if replacements == nil {
+		replacements = map[string]string{}
+	}
+	value, err := p.apply(goja.Undefined(), p.vm.ToValue(prepared), p.vm.ToValue(replacements))
 	if err != nil {
 		return "", fmt.Errorf("apply JSLT: %w", err)
 	}
