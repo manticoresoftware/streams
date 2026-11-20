@@ -40,6 +40,7 @@ RUN --mount=type=bind,from=go-test,source=/worker.test,target=/tmp/worker.test \
 # CI-only JVM-free candidate. Keep the hybrid image below as the
 # deployment default until unsupported mapping rules are ported.
 FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS native-runtime
+ENV STREAMS_NATIVE_ONLY=1
 RUN apk add --no-cache ca-certificates \
     && addgroup -S worker \
     && adduser -S -G worker worker
