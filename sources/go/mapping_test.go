@@ -113,6 +113,56 @@ func TestReferenceTransforms(t *testing.T) {
 	assertSameJSON(t, got, `{"name":"reader","selected":"Eve\n"}`)
 	links := newMapper([]string{"body => url"}, map[string]string{"url": "url"}, "1000")
 	defer links.reference.close()
+	// Compare the output and the document sent to CALL PQ with the
+	// original worker, rather than only checking the selected fields.
+	for _, tc := range []struct {
+		name   string
+		raw    string
+		rules  []string
+		fields map[string]string
+		mode   string
+	}{
+		{"rename wildcard", `{"items":[{"name":"Ann","keep":1},{"name":"Bob","keep":2}],"meta":3}`,
+			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "1010"},
+		{"scalar wildcard", `{"items":[1,true,null,"hello"]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000"},
+		{"nested wildcard objects", `{"items":[{"id":"one"},{"id":"two"}]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000"},
+		{"original wildcard", `{"items":[{"name":"Ann"},{"name":"Bob"}]}`,
+			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "0100"},
+		{"rename filtered path", `{"groups":[{"people":[{"name":"Eve","active":true},{"name":"Bob","active":false}]}]}`,
+			[]string{"groups[*].people[?(@.active == true)].name => selected"}, map[string]string{"selected": "text"}, "1010"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMapper(tc.rules, tc.fields, tc.mode)
+			defer m.reference.close()
+			if m.needsReference {
+				t.Fatal("mapping still requires the Java fallback")
+			}
+			gotMapped, got, err := m.transform(tc.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.reference.cmd != nil {
+				t.Fatal("native mapping unexpectedly started Java")
+			}
+			wantMapped, want, err := m.referenceMap(tc.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(gotMapped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantEncoded, err := json.Marshal(wantMapped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertSameJSON(t, string(encoded), string(wantEncoded))
+			assertSameJSON(t, got, want)
+		})
+	}
+
 	for _, link := range []string{
 		"http://foo.12345/path", "http://bad_host.example.com/", "http://a..b.com/x",
 		"http://example.com/p?q=%23tag#first#second",
