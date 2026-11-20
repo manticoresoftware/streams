@@ -3,8 +3,41 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+	"strconv"
 	"strings"
 )
+
+// json-smart parses decimal/exponent tokens as Java double. FormatFloat's
+// shortest-roundtrip representation is normalized to Double.toString:
+// fixed notation for 0.001 <= |n| < 1e7 and uppercase E otherwise.
+func javaNumberText(raw string) (string, bool) {
+	if !strings.ContainsAny(raw, ".eE") {
+		return raw, true
+	}
+	number, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsInf(number, 0) || math.IsNaN(number) {
+		return "", false
+	}
+	absolute := math.Abs(number)
+	if absolute != 0 && (absolute < 1e-3 || absolute >= 1e7) {
+		formatted := strconv.FormatFloat(number, 'e', -1, 64)
+		mantissa, exponent, _ := strings.Cut(formatted, "e")
+		if !strings.Contains(mantissa, ".") {
+			mantissa += ".0"
+		}
+		power, err := strconv.Atoi(exponent)
+		if err != nil {
+			return "", false
+		}
+		return mantissa + "E" + strconv.Itoa(power), true
+	}
+	formatted := strconv.FormatFloat(number, 'f', -1, 64)
+	if !strings.Contains(formatted, ".") {
+		formatted += ".0"
+	}
+	return formatted, true
+}
 
 // Jayway's JSON parser retains object key order when a wildcard selects an
 // object. Go's map[string]any does not, so use the original JSON for these
@@ -98,12 +131,8 @@ func rawMappedJSON(input json.RawMessage) (string, bool) {
 		}
 		return quoteMappedString(text), true
 	default:
-		// Java and Go format floating-point exponents differently. Keep
-		// the reference fallback until Java numeric formatting is ported.
 		if input[0] == '-' || input[0] >= '0' && input[0] <= '9' {
-			if bytes.ContainsAny(input, ".eE") {
-				return "", false
-			}
+			return javaNumberText(string(input))
 		}
 		return string(input), true
 	}
