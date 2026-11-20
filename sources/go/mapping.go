@@ -238,11 +238,7 @@ func javaWildcardText(value any) (string, bool) {
 	case bool, int, int64:
 		return fmt.Sprint(v), true
 	case json.Number:
-		// Java can normalize decimal/exponent notation differently.
-		if strings.ContainsAny(v.String(), ".eE") {
-			return "", false
-		}
-		return v.String(), true
+		return javaNumberText(v.String())
 	default:
 		// Read collections from the original JSON to retain key order.
 		return "", false
