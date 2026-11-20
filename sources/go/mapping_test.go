@@ -147,6 +147,16 @@ func TestReferenceTransforms(t *testing.T) {
 		mode   string
 		needsJava bool
 	}{
+		{"indexed original field", `{"items":[{"name":"Alice"},{"name":"Bob"}]}`,
+			[]string{"items[0].name => chosen"}, map[string]string{"chosen":"text"}, "0100", false},
+		{"quoted-key original field", `{"user.name":"Alice","keep":1}`,
+			[]string{"['user.name'] => chosen"}, map[string]string{"chosen":"text"}, "0100", false},
+		{"filtered original field", `{"items":[{"people":[{"name":"Alice","active":true},{"name":"Bob","active":false}]}]}`,
+			[]string{"items[*].people[?(@.active == true)].name => chosen"}, map[string]string{"chosen":"text"}, "0100", false},
+		{"indexed rename field", `{"items":[{"name":"Alice","keep":1},{"name":"Bob"}]}`,
+			[]string{"items[0].name => chosen"}, map[string]string{"chosen":"text"}, "1010", false},
+		{"quoted-key rename field", `{"user.name":"Alice","keep":1}`,
+			[]string{"['user.name'] => chosen"}, map[string]string{"chosen":"text"}, "1010", false},
 		{"indexed URL path", `{"links":[{"url":"https://example.com/a"},{"url":"https://other.example.com/b"}]}`,
 			[]string{"links[0].url => link"}, map[string]string{"link": "url"}, "1000", false},
 		{"second indexed URL path", `{"links":[{"url":"https://example.com/a"},{"url":"https://other.example.com/b?x=1"}]}`,
