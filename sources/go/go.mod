@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	github.com/prometheus/client_golang v1.25.0
 	github.com/ohler55/ojg v1.28.9
+	github.com/dop251/goja v0.0.0-20261118204651-8dfece3d1e1d
 	github.com/twmb/franz-go v1.22.3
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20261109062130-78bf4a9044b7
 	github.com/twmb/franz-go/pkg/kmsg v1.15.1

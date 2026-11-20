@@ -32,8 +32,15 @@ jobs:
         with:
           go-version-file: sources/go/go.mod
           cache-dependency-path: sources/go/go.sum
+      - name: Prepare Goja JSLT tests
+        run: |
+          curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o sources/go/jslt-bundle.js
+          cd sources/go
+          go mod tidy
       - run: go test ./...
         working-directory: sources/go
+        env:
+          STREAMS_JSLT_BUNDLE: ${{ github.workspace }}/sources/go/jslt-bundle.js
       # No customer expressions/documents are checked in. All fixtures are invented.
       - name: Compare synthetic JSLT features with the Java reference
         continue-on-error: true

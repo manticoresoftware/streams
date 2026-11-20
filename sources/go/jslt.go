@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -97,13 +96,6 @@ func (p *referenceProcess) call(value string) (string, error) {
 		}
 	}
 	return p.exchange(value)
-}
-
-func newJSLT(config string) (func(string) (string, error), error) {
-	if strings.TrimSpace(config) == "" {
-		return nil, nil
-	}
-	return javaReference("jslt", config).call, nil
 }
 
 // Use Unicode full lowercase mappings and contextual rules, including Greek

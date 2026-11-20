@@ -3,7 +3,9 @@ WORKDIR /build
 COPY sources/go/go.mod sources/go/go.sum ./
 RUN go mod download
 COPY sources/go/ ./
-RUN CGO_ENABLED=0 go build -trimpath -o /streams-worker .
+RUN go mod tidy \
+    && curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o /build/jslt-bundle.js \
+    && CGO_ENABLED=0 go build -trimpath -o /streams-worker .
 
 FROM go-build AS go-test
 RUN CGO_ENABLED=0 go test -c -o /worker.test .
@@ -29,6 +31,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=compat-build /KafkaHandler.jar /KafkaHandler.jar
 COPY --from=compat-build /compat /compat
+COPY --from=go-build /build/jslt-bundle.js /usr/src/myapp/jslt-bundle.js
+ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
 RUN --mount=type=bind,from=go-test,source=/worker.test,target=/tmp/worker.test \
     STREAMS_COMPAT_CLASSPATH=/compat:/KafkaHandler.jar \
     STREAMS_TEST_MBSTRING=1 /tmp/worker.test -test.v -test.run '^(TestReferenceTransforms|TestPHPUnicodeParity)$'
@@ -39,6 +43,7 @@ WORKDIR /usr/src/myapp
 COPY --from=compat-test /KafkaHandler.jar ./
 COPY --from=compat-test /compat ./compat
 COPY --from=go-build /streams-worker ./
+COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
 COPY docker/worker/check.sh ./
 USER worker
 ENTRYPOINT ["/usr/src/myapp/streams-worker"]
