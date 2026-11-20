@@ -92,6 +92,7 @@ func TestNativeJSLTParity(t *testing.T) {
 		{"SQL time", "{\"epoch\":parse-time(.when,\"yyyy-MM-dd HH:mm:ss\")}", "{\"when\":\"2026-11-20 12:00:00\"}"},
 		{"invalid time", "{\"epoch\":parse-time(.when,\"yyyy-MM-dd\", \"missing\")}", "{\"when\":\"invalid\"}"},
 		{"format time", "{\"date\":format-time(1795176000,\"yyyy-MM-dd HH:mm:ss\")}", "{}"},
+		{"named timezone format", "{\"date\":format-time(1795176000,\"yyyy-MM-dd HH:mm:ss\",\"Europe/Helsinki\")}", "{}"},
 		{"URL", "{\"url\":parse-url(.url)}", "{\"url\":\"https://example.com/a?x=1#frag\"}"},
 		{"capture", "{\"title\":capture(.text,\"(?<text>.{0,8})\").text}", "{\"text\":\"Long message\"}"},
 		{"replace", "{\"plain\":replace(.html,\"<[^>]+>\",\"\")}", "{\"html\":\"<b>word</b>\"}"},
@@ -155,6 +156,23 @@ func TestNativeJSLTParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Run this test inside the Alpine image as well as on the CI host.
+// Linux timezone databases are not installed in the minimal worker image.
+func TestJSLTNamedTimeZones(t *testing.T) {
+	if os.Getenv("STREAMS_JSLT_BUNDLE") == "" {
+		t.Skip("requires the pinned JSLT bundle")
+	}
+	fn, err := newJSLT(`{"helsinki": format-time(1795176000, "yyyy-MM-dd HH:mm:ss", "Europe/Helsinki"), "new_york": format-time(1795176000, "yyyy-MM-dd HH:mm:ss", "America/New_York")}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := fn(`{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameJSON(t, got, `{"helsinki":"2026-11-20 14:00:00","new_york":"2026-11-20 07:00:00"}`)
 }
 
 func TestNativeJSLTSafety(t *testing.T) {
