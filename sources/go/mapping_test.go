@@ -112,12 +112,12 @@ func TestStrictNativeMapper(t *testing.T) {
 	if unsupported.reference.cmd != nil {
 		t.Fatal("strict native mode started Java while validating configuration")
 	}
-	mapper := newMapper([]string{"link => url"}, map[string]string{"url": "url"}, "1000")
+	mapper := newMapper([]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "1000")
 	defer mapper.reference.close()
 	if err := mapper.requireNativeSupport(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := mapper.transform(`{"link":123}`); err == nil ||
+	if _, _, err := mapper.transform(`{"kind":{"nested":"unexpected"},"connection":{}}`); err == nil ||
 		!strings.Contains(err.Error(), "hybrid worker") {
 		t.Fatalf("runtime Java fallback was not clearly rejected: %v", err)
 	}
@@ -181,6 +181,44 @@ func TestReferenceTransforms(t *testing.T) {
 		mode   string
 		needsJava bool
 	}{
+		{"non-string URL abort 1000", `{"before":"first","link":123,"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1000", false},
+		{"undeclared field abort 1000", `{"before":"first","value":"ignored","after":"last"}`,
+			[]string{"before => before", "value => absent", "after => after"}, map[string]string{"before":"text","after":"text"}, "1000", false},
+		{"non-string URL abort 0100", `{"before":"first","link":123,"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "0100", false},
+		{"undeclared field abort 0100", `{"before":"first","value":"ignored","after":"last"}`,
+			[]string{"before => before", "value => absent", "after => after"}, map[string]string{"before":"text","after":"text"}, "0100", false},
+		{"non-string URL abort 1010", `{"before":"first","link":123,"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1010", false},
+		{"undeclared field abort 1010", `{"before":"first","value":"ignored","after":"last"}`,
+			[]string{"before => before", "value => absent", "after => after"}, map[string]string{"before":"text","after":"text"}, "1010", false},
+		{"non-string URL abort 0010", `{"before":"first","link":123,"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "0010", false},
+		{"undeclared field abort 0010", `{"before":"first","value":"ignored","after":"last"}`,
+			[]string{"before => before", "value => absent", "after => after"}, map[string]string{"before":"text","after":"text"}, "0010", false},
+		{"non-string URL abort 0011", `{"before":"first","link":123,"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "0011", false},
+		{"undeclared field abort 0011", `{"before":"first","value":"ignored","after":"last"}`,
+			[]string{"before => before", "value => absent", "after => after"}, map[string]string{"before":"text","after":"text"}, "0011", false},
+		{"boolean URL abort", `{"before":"first","link":true,"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1000", false},
+		{"object URL abort", `{"before":"first","link":{"uri":"https://example.com"},"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1010", false},
+		{"array URL abort", `{"before":"first","link":["https://example.com"],"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "0100", false},
+		{"null URL continues", `{"before":"first","link":null,"after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1010", false},
+		{"URL missing continues", `{"before":"first","after":"last"}`,
+			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1000", false},
+		{"undeclared field before any mapping", `{"value":"ignored","after":"last"}`,
+			[]string{"value => absent", "after => after"}, map[string]string{"after":"text"}, "1000", false},
+		{"undeclared field absent in document", `{"before":"first","after":"last"}`,
+			[]string{"before => before", "value => absent", "after => after"}, map[string]string{"before":"text","after":"text"}, "1000", false},
+		{"whole document without declared type", `{"value":"hello"}`,
+			[]string{"whole_document => whole"}, map[string]string{}, "1000", false},
+		{"field with empty declared type", `{"value":"hello"}`,
+			[]string{"value => chosen"}, map[string]string{"chosen":""}, "1000", false},
 		{"URL wildcard abort output", `{"value":"first","items":[{"url":"https://example.com/a"}],"other":"last"}`,
 			[]string{"value => title", "items[*].url => link", "other => extra"}, map[string]string{"title":"text","link":"url","extra":"text"}, "1000", false},
 		{"URL wildcard abort original", `{"value":"first","items":[],"other":"last"}`,
