@@ -117,7 +117,7 @@ func TestStrictNativeMapper(t *testing.T) {
 	if err := mapper.requireNativeSupport(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := mapper.transform(`{"link":"http://example.com:abc/path"}`); err == nil ||
+	if _, _, err := mapper.transform(`{"link":123}`); err == nil ||
 		!strings.Contains(err.Error(), "hybrid worker") {
 		t.Fatalf("runtime Java fallback was not clearly rejected: %v", err)
 	}
