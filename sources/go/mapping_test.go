@@ -147,6 +147,18 @@ func TestReferenceTransforms(t *testing.T) {
 		mode   string
 		needsJava bool
 	}{
+		{"filter without wildcard", `{"items":[{"name":"One","active":true},{"name":"Two","active":false}]}`,
+			[]string{"items[?(@.active == true)].name => chosen"}, map[string]string{"chosen":"text"}, "1000", false},
+		{"filter without wildcard original", `{"items":[{"name":"One","active":true},{"name":"Two","active":false}]}`,
+			[]string{"items[?(@.active == true)].name => chosen"}, map[string]string{"chosen":"text"}, "0100", false},
+		{"filter without wildcard rename", `{"items":[{"name":"One","active":true},{"name":"Two","active":false}]}`,
+			[]string{"items[?(@.active == true)].name => chosen"}, map[string]string{"chosen":"text"}, "1010", false},
+		{"slice without wildcard", `{"items":[{"name":"One"},{"name":"Two"}]}`,
+			[]string{"items[0:1].name => chosen"}, map[string]string{"chosen":"text"}, "1000", false},
+		{"slice without wildcard original", `{"items":[{"name":"One"},{"name":"Two"}]}`,
+			[]string{"items[0:1].name => chosen"}, map[string]string{"chosen":"text"}, "0100", false},
+		{"multiple indices without wildcard", `{"items":[{"name":"One"},{"name":"Two"}]}`,
+			[]string{"items[0,1].name => chosen"}, map[string]string{"chosen":"text"}, "1000", false},
 		{"indexed original field", `{"items":[{"name":"Alice"},{"name":"Bob"}]}`,
 			[]string{"items[0].name => chosen"}, map[string]string{"chosen":"text"}, "0100", false},
 		{"quoted-key original field", `{"user.name":"Alice","keep":1}`,
