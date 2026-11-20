@@ -85,6 +85,23 @@ func TestNativeLowercase(t *testing.T) {
 	}
 }
 
+// Java's default console encoding can be ASCII under LC_ALL=C. Verify that
+// the UTF-8 reference protocol preserves customer strings in that environment.
+func TestJavaBridgeUnicodeProtocol(t *testing.T) {
+	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
+		t.Skip("requires compiled StreamsCompat and the Java worker JAR")
+	}
+	t.Setenv("LC_ALL", "C")
+	ref := javaReference("jslt", `{"Text":.Text,"Id":.Id}`)
+	defer ref.close()
+	input := `{"Text":"Unicode café 漢字","Id":"пост-1"}`
+	got, err := ref.call(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameJSON(t, got, input)
+}
+
 func TestReferenceTransforms(t *testing.T) {
 	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
 		t.Skip("requires compiled StreamsCompat and the Java worker JAR")
