@@ -93,7 +93,8 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		r := mappingRule{target: target, isURL: fields[target] == "url"}
 		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 			p, ok := compileMappingPath(input)
-			if !ok && fields[target] != "url" && output[1] != '1' && !strings.ContainsAny(input, "{}") {
+			if !ok && output[1] != '1' && !strings.ContainsAny(input, "{}") &&
+				(fields[target] != "url" || (!strings.Contains(input, "[*]") && !strings.Contains(input, "[?(") && !strings.Contains(input, ".."))) {
 				// Evaluate advanced paths in Go, preserving the mapping rules as
 				// configured in the Java worker (relative paths use $. prefix).
 				path := strings.TrimSpace(input)
@@ -364,7 +365,21 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				keys = strings.Split(resolved, ".")
 			}
 			if rule.isURL {
-				v, exists := lookupMappedPath(doc, keys)
+				var v any
+				var exists bool
+				if path.advanced != nil {
+					// URL mapping requires a definite JSONPath that resolves
+					// to one string. Indefinite paths keep Java semantics.
+					values := path.advanced.Get(doc)
+					if len(values) > 1 {
+						return m.referenceMap(raw)
+					}
+					if len(values) == 1 {
+						v, exists = values[0], true
+					}
+				} else {
+					v, exists = lookupMappedPath(doc, keys)
+				}
 				if path.wildcard >= 0 {
 					return m.referenceMap(raw)
 				}
