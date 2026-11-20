@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/dop251/goja"
+	"github.com/ohler55/ojg/jp"
 )
 
 func main() {
@@ -64,6 +65,37 @@ func main() {
 		}
 		if !reflect.DeepEqual(got, want) {
 			fmt.Fprintf(os.Stderr, "%s: got %s; expected %s\n", tc.name, output, tc.expected)
+			failures++
+		}
+	}
+	// Check the two advanced Jayway queries currently delegated to Java.
+	document := map[string]any{
+		"user.name": "reader",
+		"groups": []any{map[string]any{
+			"people": []any{
+				map[string]any{"name": "Eve", "active": true},
+				map[string]any{"name": "Bob", "active": false},
+			},
+		}},
+	}
+	for _, tc := range []struct {
+		path string
+		want []any
+	}{
+		{"$.groups[*].people[?(@.active == true)].name", []any{"Eve"}},
+		{"$['user.name']", []any{"reader"}},
+		{"$.groups[*].people[*].name", []any{"Eve", "Bob"}},
+	} {
+		expr, err := jp.ParseString(tc.path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "JSONPath parse %s: %v\n", tc.path, err)
+			failures++
+			continue
+		}
+		found := expr.Get(document)
+		fmt.Printf("JSONPath %s: %v\n", tc.path, found)
+		if !reflect.DeepEqual(found, tc.want) {
+			fmt.Fprintf(os.Stderr, "JSONPath %s: got %v, want %v\n", tc.path, found, tc.want)
 			failures++
 		}
 	}
