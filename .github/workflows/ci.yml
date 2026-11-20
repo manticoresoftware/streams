@@ -34,6 +34,14 @@ jobs:
           cache-dependency-path: sources/go/go.sum
       - run: go test ./...
         working-directory: sources/go
+      # A non-blocking compatibility experiment; it does not alter the worker.
+      - name: Probe JVM-free JSLT in an embedded Go JavaScript runtime
+        continue-on-error: true
+        run: |
+          curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.min.js -o jslt-bundle.js
+          go mod tidy
+          go run .
+        working-directory: sources/jslt-poc
 
   image-build:
     needs: worker-tests
