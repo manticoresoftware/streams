@@ -28,7 +28,7 @@ func TestNativeJSLTParity(t *testing.T) {
 		{"URL", "{\"url\":parse-url(.url)}", "{\"url\":\"https://example.com/a?x=1#frag\"}"},
 		{"capture", "{\"title\":capture(.text,\"(?<text>.{0,8})\").text}", "{\"text\":\"Long message\"}"},
 		{"replace", "{\"plain\":replace(.html,\"<[^>]+>\",\"\")}", "{\"html\":\"<b>word</b>\"}"},
-		{"dynamic attributes", "{\"attributes\":{for(.ratings) \"Rating@name=\" + .key:number(.value,3)}}", "{\"ratings\":{\"taste\":\"4.125\",\"service\":\"3.5\"}}"},
+		{"dynamic attributes", "{\"attributes\":{for(.ratings) \"Rating@name=\" + .key : number(.value,3)}}", "{\"ratings\":{\"taste\":\"4.125\",\"service\":\"3.5\"}}"},
 		{"CSV numeric IDs", "{\"ids\":[for(split(.providers,\",\")) let id = number(.) $id]}", "{\"providers\":\"513,511,3\"}"},
 		{"nested get-key", "{\"blog\":get-key(.data,\"blog.id\", \"\")}", "{\"data\":{\"blog.id\":\"42\"}}"},
 		{"Unicode strings", "{\"size\":size(.value),\"title\":lowercase(.value)}", "{\"value\":\"НОВОСТИ\"}"},
