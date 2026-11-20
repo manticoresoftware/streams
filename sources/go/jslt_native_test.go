@@ -11,6 +11,39 @@ import (
 	"testing"
 )
 
+func TestProtectJSLTIntegers(t *testing.T) {
+	input := `{"large":9223372036854775807,"negative":-9223372036854775808,"small":9007199254740991,"text":"9223372036854775807","float":1.795176e9,"escaped":"\\\"9223372036854775807"}`
+	prepared, replacements, err := protectJSLTIntegers(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid([]byte(prepared)) {
+		t.Fatalf("protected input is not valid JSON: %s", prepared)
+	}
+	if len(replacements) != 2 {
+		t.Fatalf("expected two preserved integers, got %d", len(replacements))
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(prepared), &obj); err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]string{
+		"large": "9223372036854775807",
+		"negative": "-9223372036854775808",
+	} {
+		marker, ok := obj[field].(string)
+		if !ok || replacements[marker] != want {
+			t.Errorf("%s was not preserved exactly", field)
+		}
+	}
+	if obj["small"] != float64(9007199254740991) ||
+		obj["text"] != "9223372036854775807" ||
+		obj["float"] != float64(1795176000) ||
+		obj["escaped"] != "\"9223372036854775807" {
+		t.Fatalf("ordinary values were changed: %#v", obj)
+	}
+}
+
 // Compare numeric JSON values mathematically (1.0 == 1e0), without
 // rounding long integers through float64 as JavaScript JSON.parse would.
 func equivalentJSLTValue(left, right any) bool {
