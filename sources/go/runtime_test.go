@@ -83,6 +83,10 @@ func TestScalerAndHealth(t *testing.T) {
 		t.Fatal("invalid initial health")
 	}
 	m.assigned(true)
+	if status("/ready") != 503 {
+		t.Fatal("Kafka assignment alone must not allow processing")
+	}
+	m.markPQReady()
 	if status("/ready") != 200 {
 		t.Fatal("assigned worker must be ready")
 	}

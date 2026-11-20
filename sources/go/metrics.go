@@ -26,8 +26,9 @@ type metrics struct {
 	c                                   config
 	start                               time.Time
 	instance                            string
-	once                                sync.Once
-	ready                               atomic.Bool
+	firstAssignment, firstReady         sync.Once
+	hasAssignment                       atomic.Bool
+	pqReady                             chan struct{}
 	registry                            *prometheus.Registry
 	latency                             map[string]prometheus.Histogram
 	input, matched, sent, cpu           prometheus.Histogram
@@ -45,7 +46,7 @@ type metrics struct {
 }
 
 func newMetrics(c config, start time.Time) *metrics {
-	m := &metrics{c: c, start: start, instance: strconv.FormatInt(start.UnixMilli(), 10), registry: prometheus.NewRegistry(),
+	m := &metrics{c: c, start: start, pqReady: make(chan struct{}), instance: strconv.FormatInt(start.UnixMilli(), 10), registry: prometheus.NewRegistry(),
 		target: c.batchSize, perRule: make(map[string]int), latency: make(map[string]prometheus.Histogram)}
 	labels := prometheus.Labels{"instance": m.instance, "pipeline": c.label, "consumer_group": c.group}
 	kafkaLabels := prometheus.Labels{"topic": c.inputTopic, "consumer_group": c.group}
@@ -82,8 +83,8 @@ func (m *metrics) handler() http.Handler {
 	mux.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/live", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
-		if !m.ready.Load() {
-			http.Error(w, "waiting for Kafka assignment", http.StatusServiceUnavailable)
+		if !m.isReady() {
+			http.Error(w, "waiting for Kafka assignment and Manticore", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -92,9 +93,38 @@ func (m *metrics) handler() http.Handler {
 }
 
 func (m *metrics) assigned(assigned bool) {
-	m.ready.Store(assigned)
+	m.hasAssignment.Store(assigned)
 	if assigned {
-		m.once.Do(func() { slog.Info("Kafka partitions assigned after " + time.Since(m.start).String()) })
+		m.firstAssignment.Do(func() { slog.Info("Kafka partitions assigned after " + time.Since(m.start).String()) })
+		m.logFirstReady()
+	}
+}
+
+func (m *metrics) markPQReady() {
+	close(m.pqReady)
+	m.logFirstReady()
+}
+
+func (m *metrics) waitForPQ(ctx context.Context) error {
+	select {
+	case <-m.pqReady:
+	case <-ctx.Done():
+	}
+	return ctx.Err()
+}
+
+func (m *metrics) isReady() bool {
+	select {
+	case <-m.pqReady:
+		return m.hasAssignment.Load()
+	default:
+		return false
+	}
+}
+
+func (m *metrics) logFirstReady() {
+	if m.isReady() {
+		m.firstReady.Do(func() { slog.Info("Worker ready to process after " + time.Since(m.start).String()) })
 	}
 }
 

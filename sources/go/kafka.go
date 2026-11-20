@@ -225,6 +225,13 @@ func consumeBatches(ctx context.Context, c config, m *metrics, consumer *kgo.Cli
 			nextLag = time.Now().Add(5 * time.Second)
 		}
 		if len(pending) > 0 && (len(pending) >= size || !time.Now().Before(flushAt)) {
+			if firstBatch {
+				// Join Kafka while searchd starts, then hold the first batch and
+				// its offsets until the local percolate table can handle it.
+				if err := m.waitForPQ(ctx); err != nil {
+					return err
+				}
+			}
 			if err := deliverBatch(ctx, c, pending, p.process, consumer.CommitRecords); err != nil {
 				return err
 			}

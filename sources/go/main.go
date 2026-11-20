@@ -30,8 +30,8 @@ func serveWorker(ctx context.Context) error {
 		level = slog.LevelError
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	m := newMetrics(c, start)
 	listener, err := net.Listen("tcp", ":8081")
 	if err != nil {
@@ -42,7 +42,7 @@ func serveWorker(ctx context.Context) error {
 	go func() {
 		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("health server stopped", "error", err)
-			cancel()
+			cancel(err)
 		}
 	}()
 	slog.Info("worker HTTP listener started", "elapsed", time.Since(start))
@@ -54,13 +54,23 @@ func serveWorker(ctx context.Context) error {
 			return errors.New("suspension expired")
 		}
 	}
-	if err := waitForPQ(ctx, c); err != nil {
-		return err
+	// Kafka can join the group while the colocated searchd initializes its PQ
+	// table. The first batch waits at the delivery boundary before doing work.
+	go func() {
+		if err := waitForPQ(ctx, c); err != nil {
+			cancel(err)
+			return
+		}
+		slog.Info("Manticore pq table ready", "elapsed", time.Since(start))
+		m.markPQReady()
+		go m.scaleLoop(ctx)
+		m.storageLoop(ctx)
+	}()
+	err = runWorker(ctx, c, m)
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
 	}
-	slog.Info("Manticore pq table ready", "elapsed", time.Since(start))
-	go m.storageLoop(ctx)
-	go m.scaleLoop(ctx)
-	return runWorker(ctx, c, m)
+	return err
 }
 
 func main() {
