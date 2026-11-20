@@ -32,11 +32,6 @@ jobs:
         with:
           go-version-file: sources/go/go.mod
           cache-dependency-path: sources/go/go.sum
-      - name: Resolve native JSONPath dependency and print its checksums
-        run: |
-          go mod tidy
-          grep 'github.com/ohler55/ojg' go.sum
-        working-directory: sources/go
       - run: go test ./...
         working-directory: sources/go
       # A non-blocking compatibility experiment; it does not alter the worker.

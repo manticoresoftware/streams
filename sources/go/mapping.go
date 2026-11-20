@@ -249,7 +249,7 @@ func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, b
 			default:
 				return "", false, false
 			}
-			b.WriteByte('\\n')
+			b.WriteByte('\n')
 		}
 		return b.String(), true, true
 	}

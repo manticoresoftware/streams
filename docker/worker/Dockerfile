@@ -3,7 +3,6 @@ WORKDIR /build
 COPY sources/go/go.mod sources/go/go.sum ./
 RUN go mod download
 COPY sources/go/ ./
-RUN go mod tidy
 RUN CGO_ENABLED=0 go build -trimpath -o /streams-worker .
 
 FROM go-build AS go-test
