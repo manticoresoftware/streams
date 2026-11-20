@@ -113,10 +113,12 @@ func compileSkippedDescendantPath(input string) (mappingPath, bool) {
 	}
 	if strings.HasPrefix(input, ".") && !strings.HasPrefix(input, "..") {
 		p.keys = strings.Split(input, ".")
-		if len(p.keys) == 2 && simpleKey.MatchString(p.keys[1]) {
-			return p, true
+		for _, key := range p.keys[1:] {
+			if !simpleKey.MatchString(key) {
+				return p, false
+			}
 		}
-		return p, false
+		return p, len(p.keys) > 1
 	}
 	if strings.Count(input, "..") != 1 || strings.Contains(input, "...") ||
 		strings.HasPrefix(input, "..") || strings.HasSuffix(input, "..") {
