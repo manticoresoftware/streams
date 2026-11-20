@@ -18,6 +18,17 @@ func jsltDifferencePath(got, want any, path string) string {
 		return ""
 	}
 	switch a := got.(type) {
+	case string:
+		b, ok := want.(string)
+		if ok {
+			left, right := []rune(a), []rune(b)
+			for i := 0; i < len(left) && i < len(right); i++ {
+				if left[i] != right[i] {
+					return fmt.Sprintf("%s (string lengths %d/%d; first differing runes Goja U+%04X, Java U+%04X at %d)", path, len(left), len(right), left[i], right[i], i)
+				}
+			}
+			return fmt.Sprintf("%s (string lengths %d/%d)", path, len(left), len(right))
+		}
 	case map[string]any:
 		b, ok := want.(map[string]any)
 		if !ok {
