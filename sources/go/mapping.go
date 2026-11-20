@@ -93,8 +93,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		r := mappingRule{target: target, isURL: fields[target] == "url"}
 		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 			p, ok := compileMappingPath(input)
-			if !ok && fields[target] != "url" && output[1] != '1' &&
-				!(output[0] == '1' && output[2] == '1') && !strings.ContainsAny(input, "{}") {
+			if !ok && fields[target] != "url" && output[1] != '1' && !strings.ContainsAny(input, "{}") {
 				// Evaluate advanced paths in Go, preserving the mapping rules as
 				// configured in the Java worker (relative paths use $. prefix).
 				path := strings.TrimSpace(input)
@@ -107,8 +106,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
 				}
 			}
-			if !ok || (fields[target] == "" && input != "whole_document") ||
-				(output[0] == '1' && output[2] == '1' && p.wildcard >= 0) {
+			if !ok || (fields[target] == "" && input != "whole_document") {
 				m.needsReference = true
 			}
 			r.paths = append(r.paths, p)
@@ -150,12 +148,24 @@ func lookupMappedPath(value any, keys []string) (any, bool) {
 func sourceCopy(obj map[string]any) map[string]any {
 	out := make(map[string]any, len(obj))
 	for k, v := range obj {
-		if child, ok := v.(map[string]any); ok {
-			v = sourceCopy(child)
-		}
-		out[k] = v
+		out[k] = sourceCopyValue(v)
 	}
 	return out
+}
+
+func sourceCopyValue(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		return sourceCopy(value)
+	case []any:
+		items := make([]any, len(value))
+		for i, item := range value {
+			items[i] = sourceCopyValue(item)
+		}
+		return items
+	default:
+		return value
+	}
 }
 
 func deleteMappedPath(obj map[string]any, keys []string) {
@@ -163,6 +173,27 @@ func deleteMappedPath(obj map[string]any, keys []string) {
 	if p, ok := parent.(map[string]any); ok {
 		delete(p, keys[len(keys)-1])
 	}
+}
+
+// Delete only the selected nodes, including fields inside matching arrays.
+func deleteMappedSelection(obj map[string]any, path mappingPath, keys []string) error {
+	if path.advanced != nil {
+		_, err := path.advanced.Remove(obj)
+		return err
+	}
+	if path.wildcard < 0 {
+		deleteMappedPath(obj, keys)
+		return nil
+	}
+	expr := jp.R()
+	for i, key := range keys {
+		expr = expr.C(key)
+		if i == path.wildcard {
+			expr = expr.W()
+		}
+	}
+	_, err := expr.Remove(obj)
+	return err
 }
 
 // Original-field output deep-merges each selection, keeping the first
@@ -187,8 +218,23 @@ func recordOriginal(obj map[string]any, keys []string, value string) {
 }
 
 // Java only accepts a String for definite paths. A wildcard joins the values
-// in document order, including a trailing newline. Unexpected wildcard types
-// go to Jayway to retain Java collection-to-string conversion.
+// in document order, including a trailing newline.
+func javaWildcardText(value any) (string, bool) {
+	switch v := value.(type) {
+	case nil:
+		return "null", true
+	case string:
+		return v, true
+	case bool, json.Number, int, int64, float64:
+		return fmt.Sprint(v), true
+	case []any, map[string]any:
+		b, err := json.Marshal(v)
+		return string(b), err == nil
+	default:
+		return "", false
+	}
+}
+
 func selectMappedValue(root map[string]any, keys []string, wildcard int) (text string, found, compatible bool) {
 	if wildcard < 0 {
 		v, exists := lookupMappedPath(root, keys)
@@ -212,16 +258,11 @@ func selectMappedValue(root map[string]any, keys []string, wildcard int) (text s
 		if !ok {
 			continue
 		}
-		switch v := v.(type) {
-		case nil:
-			s.WriteString("null")
-		case string:
-			s.WriteString(v)
-		case bool:
-			fmt.Fprint(&s, v)
-		default:
+		text, ok := javaWildcardText(v)
+		if !ok {
 			return "", false, false
 		}
+		s.WriteString(text)
 		s.WriteByte('\n')
 	}
 	return s.String(), true, true
@@ -235,20 +276,11 @@ func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, b
 	if path.multi {
 		var b strings.Builder
 		for _, v := range values {
-			switch v := v.(type) {
-			case nil:
-				b.WriteString("null")
-			case string:
-				b.WriteString(v)
-			case bool:
-				fmt.Fprint(&b, v)
-			case json.Number:
-				b.WriteString(v.String())
-			case float64, int, int64:
-				fmt.Fprint(&b, v)
-			default:
+			text, ok := javaWildcardText(v)
+			if !ok {
 				return "", false, false
 			}
+			b.WriteString(text)
 			b.WriteByte('\n')
 		}
 		return b.String(), true, true
@@ -351,7 +383,9 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			}
 			value += text
 			if rename {
-				deleteMappedPath(out, keys)
+				if err := deleteMappedSelection(out, path, keys); err != nil {
+					return m.referenceMap(raw)
+				}
 			}
 		}
 		if rename {
