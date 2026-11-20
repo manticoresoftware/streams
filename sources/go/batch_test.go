@@ -109,3 +109,27 @@ func TestQueryFailureInterruptsDelivery(t *testing.T) {
 		t.Fatal("query failure was lost")
 	}
 }
+
+// Expected values come from JsonIterator.deserialize(tags).asMap().get("highlighting").toBoolean().
+func TestLegacyHighlightingTags(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		want  bool
+	}{
+		{`true`, true}, {`false`, false}, {`null`, false},
+		{`0`, false}, {`-1`, true}, {`-0.0`, false}, {`0.01`, true}, {`1e-400`, true},
+		{`0.1e-400`, false}, {`1.0e400`, true}, {`9223372036854775807`, true},
+		{`""`, false}, {`" \t\r\n"`, false}, {`"false"`, false}, {`"False"`, true},
+		{`" false "`, true}, {`"0"`, true}, {`"true"`, true}, {`"\u00a0"`, true},
+		{`[]`, false}, {`[false]`, true}, {`{}`, false}, {`{"x":0}`, true},
+	} {
+		_, got, err := decodeRule(map[string]any{"id": "7", "tags": `{"highlighting":` + tc.input + `}`})
+		if err != nil || got != tc.want {
+			t.Errorf("highlighting %s: got %v, %v; want %v", tc.input, got, err, tc.want)
+		}
+	}
+	_, _, err := decodeRule(map[string]any{"id": "7", "tags": `{"highlighting":9223372036854775808}`})
+	if err == nil {
+		t.Error("expected overflowing integer tag to fail as in jsoniter")
+	}
+}

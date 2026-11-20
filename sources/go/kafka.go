@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -128,6 +129,21 @@ func ensureInputTopics(ctx context.Context, client *kgo.Client, topics []string)
 	return nil
 }
 
+// Keep the saved Kafka settings intact while applying franz-go's wire limits.
+func kafkaFetchOptions(c config) []kgo.Opt {
+	const maxBrokerRead = 1 << 30
+	maxBytes := min(c.fetchMaxBytes, maxBrokerRead)
+	// Allow response headers and batches larger than the requested fetch size.
+	readBytes := max(int64(100<<20), min(2*int64(maxBytes), int64(maxBrokerRead)))
+	waitMS := max(10, min(c.fetchMaxWaitMs, math.MaxInt32))
+	return []kgo.Opt{
+		kgo.FetchMinBytes(int32(min(c.fetchMinBytes, math.MaxInt32))),
+		kgo.FetchMaxBytes(int32(maxBytes)),
+		kgo.BrokerMaxReadBytes(int32(readBytes)),
+		kgo.FetchMaxWait(time.Duration(waitMS) * time.Millisecond),
+	}
+}
+
 func runWorker(ctx context.Context, c config, m *metrics) error {
 	mapper := newMapper(c.rules, c.fields, c.output)
 	jslt, err := newJSLT(c.jslt)
@@ -140,12 +156,10 @@ func runWorker(ctx context.Context, c config, m *metrics) error {
 		owned.replace(nil)
 		m.assigned(false)
 	}
-	consumer, err := kgo.NewClient(kgo.SeedBrokers(kafkaNames(c.inputHost)...),
+	groupOpts := []kgo.Opt{kgo.SeedBrokers(kafkaNames(c.inputHost)...),
 		kgo.ConsumeTopics(topics...), kgo.ConsumerGroup(c.group),
 		kgo.Balancers(kgo.RangeBalancer()), kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()),
-		kgo.DisableAutoCommit(), kgo.BlockRebalanceOnPoll(), kgo.RebalanceTimeout(5*time.Minute),
-		kgo.FetchMinBytes(int32(c.fetchMinBytes)), kgo.FetchMaxBytes(int32(c.fetchMaxBytes)),
-		kgo.FetchMaxWait(time.Duration(c.fetchMaxWaitMs)*time.Millisecond),
+		kgo.DisableAutoCommit(), kgo.BlockRebalanceOnPoll(), kgo.RebalanceTimeout(5 * time.Minute),
 		kgo.OnPartitionsAssigned(func(_ context.Context, _ *kgo.Client, p map[string][]int32) {
 			owned.replace(p)
 			for _, ids := range p {
@@ -155,7 +169,9 @@ func runWorker(ctx context.Context, c config, m *metrics) error {
 				}
 			}
 			m.assigned(false)
-		}), kgo.OnPartitionsRevoked(revoked), kgo.OnPartitionsLost(revoked))
+		}), kgo.OnPartitionsRevoked(revoked), kgo.OnPartitionsLost(revoked),
+	}
+	consumer, err := kgo.NewClient(append(groupOpts, kafkaFetchOptions(c)...)...)
 	if err != nil {
 		return err
 	}

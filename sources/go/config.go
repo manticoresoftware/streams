@@ -69,7 +69,7 @@ func readConfig() (config, error) {
 		rules: []string{}, fields: make(map[string]string), maxBatchSize: number("MAX_BATCH_SIZE", 5000, 1),
 		minThreads: number("MIN_THREADS", 1, 0), maxThreads: number("MAX_THREADS", 3, 1),
 		maxMessage: number("MAX_MESSAGE_SIZE", 998000, 1), fetchMinBytes: number("KAFKA_FETCH_MIN_BYTES", 1, 0),
-		fetchMaxWaitMs: number("KAFKA_FETCH_MAX_WAIT_MS", 500, 1), fetchMaxBytes: number("KAFKA_FETCH_MAX_BYTES", 1048576, 1),
+		fetchMaxWaitMs: number("KAFKA_FETCH_MAX_WAIT_MS", 500, 0), fetchMaxBytes: number("KAFKA_FETCH_MAX_BYTES", 1048576, 1),
 		maxPollRecords: number("KAFKA_MAX_POLL_RECORDS", 500, 1), inactivityThreshold: number("INACTIVITY_THRESHOLD", 180, 0),
 		queryTimeout:  time.Duration(number("MAX_MANTICORE_QUERY_TIMEOUT", 300, 1)) * time.Second,
 		measureWindow: time.Duration(number("PROCESSED_MEASURE_TIME", 10, 1)) * time.Second,

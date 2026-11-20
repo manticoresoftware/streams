@@ -230,8 +230,40 @@ func decodeRule(row map[string]any) (ruleMatch, bool, error) {
 	}
 	r.tag, r.hasTag = tags["tag"]
 	r.external, r.hasExternal = tags["externalquery"]
-	highlight, _ := tags["highlighting"].(bool)
-	return r, highlight, nil
+	highlight, err := highlightEnabled(tags["highlighting"])
+	return r, highlight, err
+}
+
+// Existing rules used jsoniter Any.toBoolean(), including for imported non-boolean tags.
+func highlightEnabled(value any) (bool, error) {
+	switch v := value.(type) {
+	case bool:
+		return v, nil
+	case string:
+		return v != "false" && strings.Trim(v, " \t\n\r") != "", nil
+	case []any:
+		return len(v) > 0, nil
+	case map[string]any:
+		return len(v) > 0, nil
+	case json.Number:
+		raw := v.String()
+		if strings.Contains(raw, ".") {
+			// Java double parsing accepts infinity on overflow and zero on underflow.
+			n, _ := strconv.ParseFloat(raw, 64)
+			return n != 0, nil
+		}
+		// Without a decimal point jsoniter reads the signed integer before any exponent.
+		if exp := strings.IndexAny(raw, "eE"); exp >= 0 {
+			raw = raw[:exp]
+		}
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return false, fmt.Errorf("invalid integer highlighting tag %q: %w", raw, err)
+		}
+		return n != 0, nil
+	default:
+		return false, nil
+	}
 }
 
 func (p *batchProcessor) collectMatches(ctx context.Context, docs []batchDocument, row map[string]any, matches [][]ruleMatch) error {

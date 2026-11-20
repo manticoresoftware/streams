@@ -20,6 +20,8 @@ In this tab we can
 
 **Destination** - Select [destination](../../ReadyToWork/Admin/Destination.md)
 
+The worker uses a minimum of 10 ms for Kafka `fetch.max.wait.ms` and caps `fetch.max.bytes` at 1 GiB.
+
 ### Output documents
 
 ![Set stream output documents](SetStreamOutput.png)
