@@ -28,6 +28,12 @@ jobs:
           cache: maven
       - run: mvn test -DskipTests=false -Dmaven.test.skip=false
         working-directory: sources/src
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: sources/go/go.mod
+          cache-dependency-path: sources/go/go.sum
+      - run: go test ./...
+        working-directory: sources/go
 
   image-build:
     needs: worker-tests
@@ -84,15 +90,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - run: mvn clean compile assembly:single
-        working-directory: sources/src
-      - run: cp sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar docker/worker/KafkaHandler.jar
-      - run: docker build -t streams/worker:ci docker/worker
+      - name: Build and validate worker image
+        run: |
+          docker build -t streams/worker:ci -f docker/worker/Dockerfile .
+          docker image inspect --format 'Worker image size in bytes = {{.Size}}' streams/worker:ci
       - name: Archive validated image
         run: |
           set -euo pipefail
@@ -133,6 +134,7 @@ jobs:
               - 'sources/**'
               - 'helm-chart/**'
               - '.github/docker-compose/laravel-tests.yml'
+              - '.github/scripts/k8s/**'
               - 'dev-environment/k8s_tests/**'
               - '.github/workflows/ci.yml'
 
@@ -258,6 +260,9 @@ jobs:
       - name: Wait for Kafka consumer assignment
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/wait-for-kafka-consumer-assignment.sh
+      - name: Report Go worker startup and verify health endpoints
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-startup.sh
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/capture-kafka-start-offsets.sh

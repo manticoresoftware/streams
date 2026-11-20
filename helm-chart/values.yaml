@@ -326,15 +326,15 @@ worker:
   readinessProbe:
     enabled: true
     failureThreshold: 3
-    initialDelaySeconds: 10
-    periodSeconds: 10
+    initialDelaySeconds: 0
+    periodSeconds: 2
     successThreshold: 1
     timeoutSeconds: 1
   startupProbe:
     enabled: true
-    failureThreshold: 3
-    initialDelaySeconds: 10
-    periodSeconds: 10
+    failureThreshold: 15
+    initialDelaySeconds: 0
+    periodSeconds: 2
     successThreshold: 1
     timeoutSeconds: 1
 
