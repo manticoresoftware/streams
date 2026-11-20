@@ -3,12 +3,44 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 )
+
+// Compare numeric JSON values mathematically (1.0 == 1e0), without
+// rounding long integers through float64 as JavaScript JSON.parse would.
+func equivalentJSLTValue(left, right any) bool {
+	switch a := left.(type) {
+	case json.Number:
+		b, ok := right.(json.Number)
+		if !ok { return false }
+		x, ok := new(big.Rat).SetString(a.String())
+		if !ok { return false }
+		y, ok := new(big.Rat).SetString(b.String())
+		return ok && x.Cmp(y) == 0
+	case []any:
+		b, ok := right.([]any)
+		if !ok || len(a) != len(b) { return false }
+		for i := range a {
+			if !equivalentJSLTValue(a[i], b[i]) { return false }
+		}
+		return true
+	case map[string]any:
+		b, ok := right.(map[string]any)
+		if !ok || len(a) != len(b) { return false }
+		for key, value := range a {
+			other, exists := b[key]
+			if !exists || !equivalentJSLTValue(value, other) { return false }
+		}
+		return true
+	default:
+		return reflect.DeepEqual(left, right)
+	}
+}
 
 // These are invented inputs and expressions covering the features of the six
 // production JSLT configurations. Customer rules and messages are not checked in.
@@ -36,9 +68,15 @@ func TestNativeJSLTParity(t *testing.T) {
 		{"Unicode strings", "{\"size\":size(.value),\"title\":lowercase(.value)}", "{\"value\":\"НОВОСТИ\"}"},
 		{"null filtering", "{\"missing\":.none,\"empty\":{},\"present\":\"yes\"}", "{}"},
 		{"large exact integer", "{\"id\":.id}", "{\"id\":9223372036854775807}"},
+		{"large negative integer", "{\"id\":.id}", "{\"id\":-9223372036854775808}"},
+		{"large integer in nested array", "{\"item\":.items[0].id}", "{\"items\":[{\"id\":9223372036854775807}]}"},
+		{"large integer remains string", "{\"id\":.id}", "{\"id\":\"9223372036854775807\"}"},
 	}
 	same := func(left, right string) bool {
 		var a, b any
+		if !json.Valid([]byte(left)) || !json.Valid([]byte(right)) {
+			return false
+		}
 		la := json.NewDecoder(strings.NewReader(left))
 		lb := json.NewDecoder(strings.NewReader(right))
 		la.UseNumber()
@@ -46,8 +84,9 @@ func TestNativeJSLTParity(t *testing.T) {
 		if la.Decode(&a) != nil || lb.Decode(&b) != nil {
 			return false
 		}
-		return reflect.DeepEqual(a,b)
+		return equivalentJSLTValue(a, b)
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fn, err := newJSLT(tc.expression)
