@@ -225,37 +225,16 @@ func javaWildcardText(value any) (string, bool) {
 		return "null", true
 	case string:
 		return v, true
-	case bool, json.Number, int, int64, float64:
+	case bool, int, int64:
 		return fmt.Sprint(v), true
-	case []any:
-		// json-smart's JSONArray.toString produces compact JSON, not the
-		// output of java.util.List.toString.
-		var b strings.Builder
-		enc := json.NewEncoder(&b)
-		enc.SetEscapeHTML(false)
-		if err := enc.Encode(v); err != nil {
+	case json.Number:
+		// Java can normalize decimal/exponent notation differently.
+		if strings.ContainsAny(v.String(), ".eE") {
 			return "", false
 		}
-		return strings.TrimSuffix(b.String(), "\n"), true
-	case map[string]any:
-		// Jayway's map stringification differs from JSON serialization.
-		// Single-key objects can be represented without relying on Java's
-		// multi-key map iteration order.
-		if len(v) == 0 {
-			return "{}", true
-		}
-		if len(v) != 1 {
-			return "", false
-		}
-		for key, item := range v {
-			text, ok := javaWildcardText(item)
-			if !ok {
-				return "", false
-			}
-			return "{" + key + "=" + text + "}", true
-		}
-		return "{}", true
+		return v.String(), true
 	default:
+		// Read collections from the original JSON to retain key order.
 		return "", false
 	}
 }
@@ -409,6 +388,9 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				text, found, compatible = selectAdvancedMappedValue(doc, path)
 			} else {
 				text, found, compatible = selectMappedValue(doc, keys, path.wildcard)
+			}
+			if !compatible && path.advanced == nil && path.wildcard >= 0 && path.placeholder == "" {
+				text, found, compatible = selectRawWildcard(raw, keys, path.wildcard)
 			}
 			if !compatible {
 				return m.referenceMap(raw)
