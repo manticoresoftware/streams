@@ -159,6 +159,65 @@ func rawMappedText(input json.RawMessage) (string, bool) {
 	}
 }
 
+// The multi-wildcard subset needs only dotted field lookups and [*] expansion.
+// Walk RawMessages instead of maps to preserve Java's field order when a
+// selected value is a nested object.
+type rawWildcardStep struct {
+	key string
+	expand bool
+}
+
+func compileRawWildcardSteps(path string) ([]rawWildcardStep, bool) {
+	parts := strings.Split(path, ".")
+	steps := make([]rawWildcardStep, 0, len(parts))
+	wildcards := 0
+	for _, part := range parts {
+		expand := strings.HasSuffix(part, "[*]")
+		if expand {
+			part = strings.TrimSuffix(part, "[*]")
+			wildcards++
+		}
+		if !simpleKey.MatchString(part) {
+			return nil, false
+		}
+		steps = append(steps, rawWildcardStep{key:part, expand:expand})
+	}
+	return steps, wildcards > 1
+}
+
+func selectRawNestedWildcards(raw string, steps []rawWildcardStep) (string, bool, bool) {
+	nodes := []json.RawMessage{json.RawMessage(raw)}
+	for _, step := range steps {
+		var next []json.RawMessage
+		for _, node := range nodes {
+			value, exists := rawMappedField(node, step.key)
+			if !exists {
+				continue
+			}
+			if step.expand {
+				var elements []json.RawMessage
+				if err := json.Unmarshal(value, &elements); err != nil {
+					continue
+				}
+				next = append(next, elements...)
+			} else {
+				next = append(next, value)
+			}
+		}
+		nodes = next
+	}
+	var result strings.Builder
+	for _, node := range nodes {
+		value, ok := rawMappedText(node)
+		if !ok {
+			return "", false, false
+		}
+		result.WriteString(value)
+		result.WriteByte('\n')
+	}
+	return result.String(), true, true
+}
+
 // Recover the exact ordered map/list string produced by Jayway for a simple
 // wildcard path. Unsupported types retain the Java compatibility fallback.
 func selectRawWildcard(raw string, keys []string, wildcard int) (string, bool, bool) {
