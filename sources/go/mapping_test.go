@@ -104,7 +104,7 @@ func TestJavaBridgeUnicodeProtocol(t *testing.T) {
 
 func TestStrictNativeMapper(t *testing.T) {
 	t.Setenv("STREAMS_NATIVE_ONLY", "1")
-	unsupported := newMapper([]string{"items..name => selected"}, map[string]string{"selected": "text"}, "1000")
+	unsupported := newMapper([]string{"items...name => selected"}, map[string]string{"selected": "text"}, "1000")
 	if err := unsupported.requireNativeSupport(); err == nil || !strings.Contains(err.Error(), "hybrid worker") {
 		t.Fatalf("unsupported JSONPath was not rejected at startup: %v", err)
 	}
@@ -251,6 +251,22 @@ func TestReferenceTransforms(t *testing.T) {
 			[]string{"connection.{kind}.code => selected"}, map[string]string{"selected":"text"}, "0100", false},
 		{"dotted Unicode dynamic selector 1010", `{"kind":"漢.字","connection":{"漢":{"字":{"code":"unicode"}}}}`,
 			[]string{"connection.{kind}.code => selected"}, map[string]string{"selected":"text"}, "1010", false},
+		{"descendant path skip 1000", `{"before":"first","items":[{"name":"One"},{"name":"Two"}],"after":"last"}`,
+			[]string{"before => before", "items..name => selected", "after => after"}, map[string]string{"before":"text","selected":"text","after":"text"}, "1000", false},
+		{"descendant path skip 0100", `{"before":"first","items":[{"name":"One"},{"name":"Two"}],"after":"last"}`,
+			[]string{"before => before", "items..name => selected", "after => after"}, map[string]string{"before":"text","selected":"text","after":"text"}, "0100", false},
+		{"descendant path skip 1010", `{"before":"first","items":[{"name":"One"},{"name":"Two"}],"after":"last"}`,
+			[]string{"before => before", "items..name => selected", "after => after"}, map[string]string{"before":"text","selected":"text","after":"text"}, "1010", false},
+		{"descendant path skip 0010", `{"before":"first","items":[{"name":"One"},{"name":"Two"}],"after":"last"}`,
+			[]string{"before => before", "items..name => selected", "after => after"}, map[string]string{"before":"text","selected":"text","after":"text"}, "0010", false},
+		{"descendant nested path", `{"items":{"nested":[{"name":"One"}]},"after":"last"}`,
+			[]string{"items.nested..name => selected", "after => after"}, map[string]string{"selected":"text","after":"text"}, "0100", false},
+		{"descendant missing path", `{"other":4,"after":"last"}`,
+			[]string{"items..name => selected", "after => after"}, map[string]string{"selected":"text","after":"text"}, "0100", false},
+		{"leading descendant path", `{"name":"Root","items":[{"name":"One"}],"after":"last"}`,
+			[]string{".name => selected", "after => after"}, map[string]string{"selected":"text","after":"text"}, "1010", false},
+		{"leading descendant path original", `{"name":"Root","items":[{"name":"One"}]}`,
+			[]string{".name => selected"}, map[string]string{"selected":"text"}, "0100", false},
 		{"URL wildcard abort output", `{"value":"first","items":[{"url":"https://example.com/a"}],"other":"last"}`,
 			[]string{"value => title", "items[*].url => link", "other => extra"}, map[string]string{"title":"text","link":"url","extra":"text"}, "1000", false},
 		{"URL wildcard abort original", `{"value":"first","items":[],"other":"last"}`,
