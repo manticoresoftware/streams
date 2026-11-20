@@ -167,7 +167,9 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 					p.indefiniteAsScalar = !p.multi && javaCollectionSelector.MatchString(input)
 				}
 			}
-			if !ok && fields[target] != "url" {
+			// "$." + ".name" is "$..name": an indefinite Jayway
+			// descendant selection even when ojg successfully parses it.
+			if fields[target] != "url" && (!ok || strings.HasPrefix(input, ".")) {
 				if recursive, skipped := compileSkippedDescendantPath(input); skipped {
 					p, ok = recursive, true
 				}
