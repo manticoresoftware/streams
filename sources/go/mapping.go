@@ -519,9 +519,12 @@ func mapURLs(text, target string, mapped map[string]any) bool {
 		if err != nil {
 			return false
 		}
+		host := u.Hostname()
 		if port := u.Port(); port != "" {
 			if _, err := strconv.ParseUint(port, 10, 31); err != nil {
-				return false
+				// java.net.URI.getHost returns null when the port does
+				// not fit a signed 32-bit integer. Path/query still hash.
+				host = ""
 			}
 		}
 		q, err := url.PathUnescape(u.RawQuery)
@@ -531,7 +534,6 @@ func mapURLs(text, target string, mapped map[string]any) bool {
 		if err != nil || !validQuery || !validPath || !validFragment {
 			return false
 		}
-		host := u.Hostname()
 		if host != "" && !dnsName.MatchString(host) && net.ParseIP(host) == nil {
 			// URI keeps the raw authority but returns null from getHost for
 			// underscores, empty labels, or numeric top-level domains.
