@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/url"
@@ -195,7 +196,8 @@ func protectJSLTIntegers(input string) (string, map[string]string, error) {
 				}
 				marker := "\x00streams-int-" + nonce + "-" + strconv.Itoa(len(replacements))
 				replacements[marker] = text
-				output.WriteString(strconv.Quote(marker))
+				quoted, _ := json.Marshal(marker) // JSON escapes NUL as \\u0000, not \\x00.
+				output.Write(quoted)
 				i = end
 				continue
 			}
