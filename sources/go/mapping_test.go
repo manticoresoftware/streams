@@ -117,7 +117,11 @@ func TestReferenceTransforms(t *testing.T) {
 		"http://tieba.baidu.com/f?kw=%C1%F5%C7%AB", "www.example.com/path?x=a%26b#",
 	} {
 		doc, _ := json.Marshal(map[string]string{"body": link})
+		links.reference.close() // Ensure the mapper does not silently start Java.
 		_, native, err := links.transform(string(doc))
+		if links.reference.cmd != nil {
+			t.Fatalf("native URL mapping started the Java fallback for %q", link)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

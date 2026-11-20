@@ -326,16 +326,13 @@ func decodedURIText(s string) (string, bool) {
 		r, n := utf8.DecodeRuneInString(s)
 		if r == utf8.RuneError && n == 1 {
 			first := s[0]
-			if first == 0xe0 || first == 0xed || first == 0xf0 || first == 0xf4 {
-				return "", false
-			}
 			width := 1
 			switch {
 			case first >= 0xc2 && first <= 0xdf:
 				width = 2
-			case first >= 0xe1 && first <= 0xef:
+			case first >= 0xe0 && first <= 0xef:
 				width = 3
-			case first >= 0xf1 && first <= 0xf3:
+			case first >= 0xf0 && first <= 0xf4:
 				width = 4
 			}
 			for n < width && n < len(s) && s[n]&0xc0 == 0x80 {
@@ -361,7 +358,7 @@ func mapURLs(text, target string, mapped map[string]any) bool {
 			raw = escapeURIFragment.Replace(raw)
 			u, err = url.Parse(raw)
 		}
-		if err != nil || u.User != nil {
+		if err != nil {
 			return false
 		}
 		if port := u.Port(); port != "" {
