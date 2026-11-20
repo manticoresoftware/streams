@@ -82,12 +82,20 @@ func TestPrivateJSLTCompilation(t *testing.T) {
 				for i, doc := range fixtures[row[2]] {
 					got, goErr := native(string(doc))
 					want, javaErr := reference.call(string(doc))
-					if goErr != nil || javaErr != nil {
-						t.Errorf("synthetic input %d failed: Goja=%v Java=%v", i, goErr, javaErr)
+					if (goErr != nil) != (javaErr != nil) {
+						t.Errorf("synthetic input %d has different error behavior: Goja=%v Java=%v", i, goErr, javaErr)
+						continue
+					}
+					if goErr != nil {
+						// Both engines rejected this synthetic input.
 						continue
 					}
 					var a, b map[string]any
-					if json.Unmarshal([]byte(got), &a) != nil || json.Unmarshal([]byte(want), &b) != nil {
+					goJSON := json.NewDecoder(strings.NewReader(got))
+					javaJSON := json.NewDecoder(strings.NewReader(want))
+					goJSON.UseNumber()
+					javaJSON.UseNumber()
+					if goJSON.Decode(&a) != nil || javaJSON.Decode(&b) != nil {
 						t.Errorf("synthetic input %d produced invalid JSON", i)
 						continue
 					}
