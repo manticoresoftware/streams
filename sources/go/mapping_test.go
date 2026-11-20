@@ -317,6 +317,8 @@ func TestReferenceTransforms(t *testing.T) {
 	}
 
 	for _, link := range []string{
+		"http://example.com:abc/path#fragment", "http://example.com:-1/path",
+		"http://example.com:abc/path?x=a+b#fragment", "http://example.com:abc",
 		"http://example.com:2147483647/path", "http://example.com:2147483648/path",
 		"http://example.com:999999999999999/path?x=1", "http://example.com:65536/path",
 		"http://example.com:/path",
