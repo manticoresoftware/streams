@@ -29,6 +29,8 @@ type mappingPath struct {
 	advanced jp.Expr
 	multi bool
 	indefiniteAsScalar bool
+	urlCollectionPrefix []string
+	urlCollectionArrayOnly bool
 	keys        []string
 	wildcard    int
 	placeholder string
@@ -136,6 +138,55 @@ func compileSkippedDescendantPath(input string) (mappingPath, bool) {
 	return p, true
 }
 
+// The legacy URL mapper assigns Jayway's result directly to String. A
+// collection-valued JSONPath aborts that document's mapping loop, even if the
+// collection is empty. Jayway distinguishes a missing root from an existing
+// field; slices/unions additionally require an array to yield a collection.
+// Recognize only paths with a plain dotted prefix and valid JSONPath syntax.
+var urlArraySelection = regexp.MustCompile(`\[(?:[0-9]*:[0-9]*|[0-9]+(?:,[0-9]+)+)\]`)
+
+func compileURLCollectionPath(input string) (mappingPath, bool) {
+	p := mappingPath{wildcard: -1}
+	type selection struct {
+		position int
+		arrayOnly bool
+	}
+	var choices []selection
+	for _, selector := range []string{"[*]", "[?(", ".."} {
+		if at := strings.Index(input, selector); at >= 0 {
+			choices = append(choices, selection{position: at})
+		}
+	}
+	if where := urlArraySelection.FindStringIndex(input); where != nil {
+		choices = append(choices, selection{position: where[0], arrayOnly: true})
+	}
+	if len(choices) == 0 {
+		return p, false
+	}
+	first := choices[0]
+	for _, candidate := range choices[1:] {
+		if candidate.position < first.position {
+			first = candidate
+		}
+	}
+	prefix := strings.TrimSuffix(input[:first.position], ".")
+	if prefix == "" || strings.ContainsAny(prefix, "[]{}()") {
+		return p, false
+	}
+	keys := strings.Split(prefix, ".")
+	for _, key := range keys {
+		if !simpleKey.MatchString(key) {
+			return p, false
+		}
+	}
+	if _, err := jp.ParseString("$." + input); err != nil {
+		return p, false
+	}
+	p.urlCollectionPrefix = keys
+	p.urlCollectionArrayOnly = first.arrayOnly
+	return p, true
+}
+
 func newMapper(rules []string, fields map[string]string, output string) *mapper {
 	cfg, _ := json.Marshal(struct {
 		Rules  []string          `json:"rules"`
@@ -167,6 +218,11 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 				if expression, err := jp.ParseString(path); err == nil {
 					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
 					p.indefiniteAsScalar = !p.multi && javaCollectionSelector.MatchString(input)
+				}
+			}
+			if fields[target] == "url" {
+				if collection, supported := compileURLCollectionPath(input); supported {
+					p, ok = collection, true
 				}
 			}
 			// "$." + ".name" is "$..name": an indefinite Jayway
@@ -467,6 +523,17 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				return m.abortMapping(raw, mapped, out)
 			}
 			if rule.isURL {
+				if len(path.urlCollectionPrefix) > 0 {
+					root, present := lookupMappedPath(doc, path.urlCollectionPrefix)
+					if present {
+						_, isArray := root.([]any)
+						if !path.urlCollectionArrayOnly || isArray {
+							return m.abortMapping(raw, mapped, out)
+						}
+					}
+					value = ""
+					continue
+				}
 				var v any
 				var exists bool
 				if path.advanced != nil {
