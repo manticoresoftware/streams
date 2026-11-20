@@ -12,7 +12,7 @@ import (
 )
 
 func TestProtectJSLTIntegers(t *testing.T) {
-	input := `{"large":9223372036854775807,"negative":-9223372036854775808,"small":9007199254740991,"text":"9223372036854775807","float":1.795176e9,"escaped":"\\\"9223372036854775807"}`
+	input := `{"large":9223372036854775807,"negative":-9223372036854775808,"small":9007199254740991,"text":"9223372036854775807","float":1.795176e9,"escaped":"\"9223372036854775807"}`
 	prepared, replacements, err := protectJSLTIntegers(input)
 	if err != nil {
 		t.Fatal(err)
