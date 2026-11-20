@@ -9,7 +9,7 @@ require (
 	github.com/twmb/franz-go v1.22.3
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20261109062130-78bf4a9044b7
 	github.com/twmb/franz-go/pkg/kmsg v1.15.1
-	golang.org/x/text v0.42.0
+	golang.org/x/text v0.43.0
 )
 
 require (
