@@ -5,6 +5,7 @@ RUN go mod download
 COPY sources/go/ ./
 RUN go mod tidy \
     && curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o /build/jslt-bundle.js \
+    && sha256sum /build/jslt-bundle.js \
     && CGO_ENABLED=0 go build -trimpath -o /streams-worker .
 
 FROM go-build AS go-test

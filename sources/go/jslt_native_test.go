@@ -20,6 +20,8 @@ func TestNativeJSLTParity(t *testing.T) {
 		name, expression, input string
 	}{
 		{"functions", "def normalize(x) if ($x) uppercase($x) else \"missing\" {\"text\":normalize(.text)}", "{\"text\":\"hello\"}"},
+		{"top-level let before def", "let object = .entry\ndef value(x) if ($x.title) $x.title else \"none\"\n{\"title\":value($object)}", "{\"entry\":{\"title\":\"present\"}}"},
+		{"forward function reference", "def first(x) second($x)\ndef second(x) string($x)\n{\"value\":first(.id)}", "{\"id\":42}"},
 		{"nested content", "let obj = if (.post) .post else .comment {\"id\":$obj.id,\"text\":if ($obj.body) $obj.body else \"\",\"matches\":.matching_queries}", "{\"post\":{\"id\":\"p1\",\"body\":\"body\"},\"matching_queries\":[{\"queryid\":7}]}"},
 		{"ISO time", "{\"epoch\":round(parse-time(.when,\"yyyy-MM-dd'T'HH:mm:ssX\") * 1000)}", "{\"when\":\"2026-11-20T12:00:00Z\"}"},
 		{"SQL time", "{\"epoch\":parse-time(.when,\"yyyy-MM-dd HH:mm:ss\")}", "{\"when\":\"2026-11-20 12:00:00\"}"},
