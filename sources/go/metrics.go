@@ -36,6 +36,7 @@ type metrics struct {
 	mu                                  sync.Mutex
 	position, backlog                   int64
 	haveLag                             bool
+	freshLag                            bool
 	target                              int
 	lastBatch                           time.Duration
 	window                              []rateSample
@@ -134,6 +135,7 @@ func (m *metrics) lag(_ context.Context, lag, offset int64, _ int) int {
 	defer m.mu.Unlock()
 	m.backlog = lag
 	m.haveLag = true
+	m.freshLag = true
 	m.kafkaLag.Set(float64(lag))
 	if offset > m.position {
 		m.offset.Add(float64(offset - m.position))
@@ -144,10 +146,11 @@ func (m *metrics) lag(_ context.Context, lag, offset int64, _ int) int {
 
 func (m *metrics) updateScaler(ctx context.Context) {
 	m.mu.Lock()
-	if !m.haveLag {
+	if !m.freshLag {
 		m.mu.Unlock()
 		return
 	}
+	m.freshLag = false
 	v := url.Values{"label": {m.c.label}, "lag": {strconv.FormatInt(m.backlog, 10)},
 		"minThreads": {strconv.Itoa(m.c.minThreads)}, "maxThreads": {strconv.Itoa(m.c.maxThreads)},
 		"maxBatchSize": {strconv.Itoa(m.c.maxBatchSize)}, "batchSize": {strconv.Itoa(m.target)},
@@ -160,17 +163,20 @@ func (m *metrics) updateScaler(ctx context.Context) {
 		slog.Warn("scaler request failed", "error", err)
 		return
 	}
-	var resp struct{ BatchSize *int }
+	var resp struct{ BatchSize *json.Number }
 	if err = json.Unmarshal(b, &resp); err != nil {
 		slog.Warn("invalid scaler response", "error", err)
 		return
 	}
 	target := m.c.batchSize
 	if resp.BatchSize != nil {
-		if *resp.BatchSize <= 0 {
+		// The PHP scaler can return the posted maximum as a numeric string
+		// or a fractional number when applying its five-percent floor.
+		size, err := resp.BatchSize.Float64()
+		if err != nil || size < 1 {
 			return
 		}
-		target = min(*resp.BatchSize, m.c.maxBatchSize)
+		target = int(min(size, float64(m.c.maxBatchSize)))
 	}
 	m.mu.Lock()
 	m.target = target

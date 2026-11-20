@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -62,7 +63,9 @@ func TestCLIResponse(t *testing.T) {
 }
 
 func TestScalerAndHealth(t *testing.T) {
+	var requests atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		if r.FormValue("lag") != "17" || r.FormValue("label") != "m1" || r.FormValue("batchSize") != "10" {
 			t.Error("unexpected scaler form")
 		}
@@ -89,6 +92,10 @@ func TestScalerAndHealth(t *testing.T) {
 	}
 	m.lag(context.Background(), 17, 4, 10)
 	m.updateScaler(context.Background())
+	m.updateScaler(context.Background())
+	if requests.Load() != 1 {
+		t.Fatal("stale lag triggered a second scaling decision")
+	}
 	if size := m.lag(context.Background(), 17, 5, 10); size != 12 {
 		t.Fatalf("returned batch size %d", size)
 	}
@@ -99,5 +106,24 @@ func TestScalerAndHealth(t *testing.T) {
 	}
 	if values["m1_handler_processed_docs"] != 7 || values["m1_handler_processed_rules"] != 2 || values["m1_consumer_lag"] != 17 {
 		t.Fatalf("unexpected metrics: %v", values)
+	}
+}
+
+func TestPHPScalerBatchSize(t *testing.T) {
+	for _, tc := range []struct {
+		reply string
+		want  int
+	}{
+		{`{"batchSize":"5000"}`, 5000}, {`{"batchSize":2.75}`, 2},
+		{`{"batchSize":0}`, 948}, {`{}`, 948},
+	} {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, tc.reply) }))
+		m := newMetrics(config{batchSize: 948, maxBatchSize: 5000, scalerHost: strings.TrimPrefix(ts.URL, "http://")}, time.Now())
+		m.lag(context.Background(), 42, 5, 948)
+		m.updateScaler(context.Background())
+		ts.Close()
+		if m.target != tc.want {
+			t.Errorf("%s: batch size %d, want %d", tc.reply, m.target, tc.want)
+		}
 	}
 }

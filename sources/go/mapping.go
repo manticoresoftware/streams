@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -208,7 +210,7 @@ func selectMappedValue(root map[string]any, keys []string, wildcard int) (text s
 }
 
 func (m *mapper) transform(raw string) (any, string, error) {
-	if m.needsReference || !json.Valid([]byte(raw)) {
+	if m.needsReference {
 		return m.referenceMap(raw)
 	}
 	if m.passThroughWithoutRule {
@@ -217,7 +219,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	var doc map[string]any
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
-	if err := decoder.Decode(&doc); err != nil || doc == nil {
+	if err := decoder.Decode(&doc); err != nil || doc == nil || strings.TrimSpace(raw[decoder.InputOffset():]) != "" {
 		return m.referenceMap(raw)
 	}
 	mapped := map[string]any{}
@@ -312,21 +314,78 @@ func (m *mapper) transform(raw string) (any, string, error) {
 var linkPattern = regexp.MustCompile(`(^|[^\w])((([Hh][Tt]|[Ff])[Tt][Pp][Ss]?://|[Ww][Ww][Ww]\.)[\w-]+\.[[:alnum:].,%_=?&#\+()*$~@!:/{};'-]*)`)
 var dnsName = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+([a-zA-Z]([a-zA-Z0-9-]*[a-zA-Z0-9])?)\.?$`)
 
+// java.net.URI decodes percent-escaped octets as UTF-8 with replacement.
+// Go's URL parser returns the original bytes. Consume each malformed prefix
+// once, as Java's decoder does; unusual restricted lead bytes use the oracle.
+func decodedURIText(s string) (string, bool) {
+	if utf8.ValidString(s) {
+		return s, true
+	}
+	var out strings.Builder
+	for len(s) > 0 {
+		r, n := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && n == 1 {
+			first := s[0]
+			if first == 0xe0 || first == 0xed || first == 0xf0 || first == 0xf4 {
+				return "", false
+			}
+			width := 1
+			switch {
+			case first >= 0xc2 && first <= 0xdf:
+				width = 2
+			case first >= 0xe1 && first <= 0xef:
+				width = 3
+			case first >= 0xf1 && first <= 0xf3:
+				width = 4
+			}
+			for n < width && n < len(s) && s[n]&0xc0 == 0x80 {
+				n++
+			}
+		}
+		out.WriteRune(r)
+		s = s[n:]
+	}
+	return out.String(), true
+}
+
+// URI falls back to Guava's URL fragment escaper when the matched text is
+// malformed. These are the only unsafe characters allowed by linkPattern.
+var escapeURIFragment = strings.NewReplacer("%", "%25", "#", "%23", "{", "%7B", "}", "%7D")
+var nonDNSName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
 func mapURLs(text, target string, mapped map[string]any) bool {
 	for _, at := range linkPattern.FindAllStringSubmatchIndex(text, -1) {
 		raw := text[at[4]:at[5]]
 		u, err := url.Parse(raw)
-		if err != nil || strings.ContainsAny(raw, "{}") || strings.Count(raw, "#") > 1 ||
-			(u.Host != "" && !dnsName.MatchString(u.Hostname())) {
-			// java.net.URI and Guava's retry escaping differ for malformed hosts
-			// and escapes. Keep their exact behavior for these inputs.
+		if strings.ContainsAny(raw, "{}") || strings.Count(raw, "#") > 1 || (err != nil && strings.Contains(err.Error(), "invalid URL escape")) {
+			raw = escapeURIFragment.Replace(raw)
+			u, err = url.Parse(raw)
+		}
+		if err != nil || u.User != nil {
 			return false
 		}
-		query, err := url.PathUnescape(u.RawQuery)
-		if err != nil || !utf8.ValidString(query) || !utf8.ValidString(u.Path) || !utf8.ValidString(u.Fragment) {
+		if port := u.Port(); port != "" {
+			if _, err := strconv.ParseUint(port, 10, 31); err != nil {
+				return false
+			}
+		}
+		q, err := url.PathUnescape(u.RawQuery)
+		query, validQuery := decodedURIText(q)
+		pathText, validPath := decodedURIText(u.Path)
+		fragment, validFragment := decodedURIText(u.Fragment)
+		if err != nil || !validQuery || !validPath || !validFragment {
 			return false
 		}
-		if host := u.Hostname(); host != "" {
+		host := u.Hostname()
+		if host != "" && !dnsName.MatchString(host) && net.ParseIP(host) == nil {
+			// URI keeps the raw authority but returns null from getHost for
+			// underscores, empty labels, or numeric top-level domains.
+			if !nonDNSName.MatchString(host) || strings.Count(host, ".") == 3 && strings.Trim(host, "0123456789.") == "" {
+				return false
+			}
+			host = ""
+		}
+		if host != "" {
 			labels := strings.Split(strings.TrimSuffix(host, "."), ".")
 			suffix := ""
 			for i := len(labels) - 1; i >= 0; i-- {
@@ -338,7 +397,7 @@ func mapURLs(text, target string, mapped map[string]any) bool {
 			}
 		}
 		path := ""
-		for _, part := range strings.Split(u.Path, "/") {
+		for _, part := range strings.Split(pathText, "/") {
 			if part != "" {
 				path += "/" + part
 				appendURLHash(mapped, target+"_host_path", path)
@@ -348,7 +407,7 @@ func mapURLs(text, target string, mapped map[string]any) bool {
 			appendURLHash(mapped, target+"_query", strings.ReplaceAll(query, "&", " "))
 		}
 		if strings.Contains(raw, "#") {
-			appendURLHash(mapped, target+"_anchor", u.Fragment)
+			appendURLHash(mapped, target+"_anchor", fragment)
 		}
 	}
 	return true

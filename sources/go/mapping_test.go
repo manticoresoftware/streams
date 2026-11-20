@@ -95,18 +95,36 @@ func TestReferenceTransforms(t *testing.T) {
 		}
 		assertSameJSON(t, got, tc.want)
 	}
-	complex := newMapper([]string{"people[?(@.active == true)][*].name => selected"}, map[string]string{"selected": "text"}, "1000")
+	complex := newMapper([]string{"groups[*].people[?(@.active == true)].name => selected", "['user.name'] => name"},
+		map[string]string{"selected": "text", "name": "text"}, "1000")
 	if !complex.needsReference {
 		t.Fatal("advanced Jayway expression did not select reference evaluator")
 	}
-	// Use Jayway's bracket notation for a definite key containing a dot.
-	complex = newMapper([]string{"['user.name'] => name"}, map[string]string{"name": "text"}, "1000")
-	_, got, err := complex.transform(`{"user.name":"Eve"}`)
+	_, got, err := complex.transform(`{"user.name":"reader","groups":[{"people":[{"name":"Eve","active":true},{"name":"Bob","active":false}]}]}`)
 	defer complex.reference.close()
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSameJSON(t, got, `{"name":"Eve"}`)
+	assertSameJSON(t, got, `{"name":"reader","selected":"Eve\n"}`)
+	links := newMapper([]string{"body => url"}, map[string]string{"url": "url"}, "1000")
+	defer links.reference.close()
+	for _, link := range []string{
+		"http://foo.12345/path", "http://bad_host.example.com/", "http://a..b.com/x",
+		"http://example.com/p?q=%23tag#first#second",
+		"http://example.com/%BD%E3%BD%E3%CE%D2%B6%E9%C2%E4%C1%CB/",
+		"http://tieba.baidu.com/f?kw=%C1%F5%C7%AB", "www.example.com/path?x=a%26b#",
+	} {
+		doc, _ := json.Marshal(map[string]string{"body": link})
+		_, native, err := links.transform(string(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, reference, err := links.referenceMap(string(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertSameJSON(t, native, reference)
+	}
 }
 
 func TestPHPUnicodeParity(t *testing.T) {

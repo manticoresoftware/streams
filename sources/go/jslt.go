@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"unicode"
 )
 
@@ -15,7 +18,8 @@ import (
 // configuration. Each request and reply is a JSON line, including embedded newlines.
 type referenceProcess struct {
 	mu      sync.Mutex
-	command func() *exec.Cmd
+	command func(context.Context) *exec.Cmd
+	stop    context.CancelFunc
 	config  string
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
@@ -24,19 +28,19 @@ type referenceProcess struct {
 }
 
 func javaReference(mode, config string) *referenceProcess {
-	return &referenceProcess{config: config, command: func() *exec.Cmd {
+	return &referenceProcess{config: config, command: func(ctx context.Context) *exec.Cmd {
 		cp := os.Getenv("STREAMS_COMPAT_CLASSPATH")
 		if cp == "" {
 			cp = "/usr/src/myapp/compat:/usr/src/myapp/KafkaHandler.jar"
 		}
-		return exec.Command("java", "-cp", cp, "StreamsCompat", mode)
+		return exec.CommandContext(ctx, "java", "-cp", cp, "StreamsCompat", mode)
 	}}
 }
 
 func (p *referenceProcess) close() {
 	if p.cmd != nil {
+		p.stop()
 		p.stdin.Close()
-		p.cmd.Process.Kill()
 		p.cmd.Wait()
 		p.cmd = nil
 	}
@@ -65,21 +69,25 @@ func (p *referenceProcess) call(value string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cmd == nil {
-		cmd := p.command()
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		cmd := p.command(ctx)
 		cmd.Stderr = os.Stderr
 		in, err := cmd.StdinPipe()
 		if err != nil {
+			cancel()
 			return "", err
 		}
 		out, err := cmd.StdoutPipe()
 		if err != nil {
 			in.Close()
+			cancel()
 			return "", err
 		}
 		if err = cmd.Start(); err != nil {
+			cancel()
 			return "", err
 		}
-		p.cmd, p.stdin = cmd, in
+		p.cmd, p.stdin, p.stop = cmd, in, cancel
 		p.encode, p.decode = json.NewEncoder(in), json.NewDecoder(out)
 		if _, err := p.exchange(p.config); err != nil {
 			p.close()
@@ -98,8 +106,8 @@ func newJSLT(config string) (func(string) (string, error), error) {
 
 // Match mb_strtolower in the Java image, including contextual and multi-rune
 // mappings. Only exceptional batches need the persistent PHP process.
-var mbLower = &referenceProcess{command: func() *exec.Cmd {
-	return exec.Command("php", "-r", `
+var mbLower = &referenceProcess{command: func(ctx context.Context) *exec.Cmd {
+	return exec.CommandContext(ctx, "php", "-r", `
 fgets(STDIN);
 echo "{\"data\":\"\"}\n";
 while (($line = fgets(STDIN)) !== false) {

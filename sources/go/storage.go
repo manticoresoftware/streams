@@ -76,6 +76,15 @@ func sendPoints(ctx context.Context, base string, points []point) error {
 	return nil
 }
 
+func ensureMetricsTable(ctx context.Context, base string) error {
+	rows, err := queryAt(ctx, base, 4*time.Second, "SHOW TABLES LIKE 'metrics'")
+	if err != nil || len(rows) > 0 {
+		return err
+	}
+	_, err = queryAt(ctx, base, 4*time.Second, "CREATE TABLE IF NOT EXISTS metrics (metric_name text, scraptime bigint, tag bigint, value float) engine='columnar'")
+	return err
+}
+
 // Metrics storage is best effort and must never delay joining Kafka.
 func (m *metrics) storageLoop(ctx context.Context) {
 	t := time.NewTicker(5 * time.Second)
@@ -106,10 +115,12 @@ func (m *metrics) storageLoop(ctx context.Context) {
 			}
 			var err error
 			if !tableReady {
-				_, err = queryAt(writeCtx, m.c.storageURL, 4*time.Second, "CREATE TABLE IF NOT EXISTS metrics (metric_name text, scraptime bigint, tag bigint, value float) engine='columnar'")
+				err = ensureMetricsTable(writeCtx, m.c.storageURL)
 			}
-			if err == nil {
-				err = sendPoints(writeCtx, m.c.storageURL, points)
+			for len(points) > 0 && err == nil {
+				n := min(len(points), 5000)
+				err = sendPoints(writeCtx, m.c.storageURL, points[:n])
+				points = points[n:]
 			}
 			cancel()
 			tableReady = err == nil
