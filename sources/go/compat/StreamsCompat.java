@@ -54,7 +54,8 @@ public class StreamsCompat {
 
     public static void main(String[] args) throws IOException {
         // Reserve stdout for the protocol, including when the existing worker logs.
-        PrintStream protocol = System.out;
+        // Always use UTF-8 for the line protocol, even with an ASCII locale.
+        PrintStream protocol = new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8);
         System.setOut(System.err);
         var in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         Transform transform = null;
