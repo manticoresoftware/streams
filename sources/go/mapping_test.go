@@ -757,51 +757,21 @@ func TestStrictNativeMalformedDocuments(t *testing.T) {
 	}
 }
 
-// Non-object roots fail Java's Map cast in no-transform modes before
-// any rules execute. Verify that the native worker reproduces both outputs.
-func TestNativeNonObjectNoTransformParity(t *testing.T) {
-	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
-		t.Skip("requires the Java compatibility oracle")
-	}
-	cases := []struct{ name, raw string }{
-		{"integer", `42`},
-		{"string", `"hello"`},
-		{"boolean", `true`},
-		{"empty array", `[]`},
-		{"array of objects", `[{"items":["One"]}]`},
-	}
+// A non-object JSON root leaves the legacy Java mapper without a valid
+// output document. Native-only mode must not silently acknowledge it.
+func TestStrictNativeNonObjectRoots(t *testing.T) {
+	t.Setenv("STREAMS_NATIVE_ONLY", "1")
 	for _, mode := range []string{"0010", "0011", "1010", "1011"} {
-		for _, input := range cases {
-			t.Run(mode+"/"+input.name, func(t *testing.T) {
+		for _, raw := range []string{`42`, `"hello"`, `true`, `[]`, `[{"items":["One"]}]`} {
 			m := newMapper([]string{"whole_document => json", "items[*] => selected"},
 				map[string]string{"json": "json", "selected": "text"}, mode)
-			defer m.reference.close()
-			t.Setenv("STREAMS_NATIVE_ONLY", "1")
-			gotMapped, gotOutput, err := m.transform(input.raw)
-			if err != nil {
-				t.Fatal(err)
+			_, _, err := m.transform(raw)
+			if err == nil || !strings.Contains(err.Error(), "hybrid worker") {
+				t.Fatalf("mode %s input %q: expected compatibility error, got %v", mode, raw, err)
 			}
 			if m.reference.cmd != nil {
-				t.Fatal("native mapper started Java on a non-object root")
+				t.Fatal("native-only mode unexpectedly started Java")
 			}
-			t.Setenv("STREAMS_NATIVE_ONLY", "0")
-			wantMapped, wantOutput, err := m.referenceMap(input.raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := json.Marshal(gotMapped)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want, err := json.Marshal(wantMapped)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !sameFixtureJSON(string(got), string(want)) || gotOutput != wantOutput {
-				t.Fatalf("non-object root: Go mapped=%s output=%q; Java mapped=%s output=%q",
-					got, gotOutput, want, wantOutput)
-			}
-		})
 		}
 	}
 }
