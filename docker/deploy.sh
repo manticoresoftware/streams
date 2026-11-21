@@ -26,7 +26,13 @@ COMPONENT="$1"
 echo "Building $COMPONENT with tag: $BUILD_TAG"
 
 # Build and push only the specific tag
-docker build --no-cache -f Dockerfile -t "${REGISTRY}/${COMPONENT}:${BUILD_TAG}" .
+context=.
+dockerfile=Dockerfile
+if [ "$COMPONENT" = worker ]; then
+  context=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+  dockerfile="$context/docker/worker/Dockerfile"
+fi
+docker build --no-cache -f "$dockerfile" -t "${REGISTRY}/${COMPONENT}:${BUILD_TAG}" "$context"
 docker push "${REGISTRY}/${COMPONENT}:${BUILD_TAG}"
 
 echo "Successfully built $COMPONENT with tag $BUILD_TAG"

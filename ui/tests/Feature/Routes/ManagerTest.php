@@ -346,6 +346,19 @@ class ManagerTest extends TestCase
 
         unset($response['data'][0]['statistic']);
 
+        // Replacing a rule may cross a one-second timestamp boundary.
+        // Check the updated timestamp independently, but still compare all
+        // other tags and response fields exactly.
+        $actualTags = json_decode($response['data'][0]['tags'], true);
+        $this->assertIsArray($actualTags);
+        $this->assertArrayHasKey('updated', $actualTags);
+        $this->assertMatchesRegularExpression('/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/', $actualTags['updated']);
+        $this->assertGreaterThanOrEqual(
+            strtotime($originalTags['updated']),
+            strtotime($actualTags['updated'])
+        );
+        $modifiedTags['updated'] = $actualTags['updated'];
+
         $this->assertSame([
             'data' => [
                 [

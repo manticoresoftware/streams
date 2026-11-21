@@ -1,0 +1,99 @@
+name: Worker transform benchmarks
+
+on:
+  pull_request:
+    paths:
+      - 'sources/go/**'
+      - '.github/workflows/worker-transform-benchmarks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-transform-benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  warmed-transformers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: sources/go/go.mod
+          cache-dependency-path: sources/go/go.sum
+      - name: Build Java reference and prepare the pinned JSLT bundle
+        run: |
+          set -euo pipefail
+          mvn -B -q -DskipTests -f sources/src/pom.xml compile assembly:single
+          worker_jar=$(find sources/src/target -maxdepth 1 -name '*-jar-with-dependencies.jar' -print -quit)
+          test -n "$worker_jar"
+          mkdir -p /tmp/streams-bench-compat
+          javac -cp "$worker_jar" -d /tmp/streams-bench-compat sources/go/compat/StreamsCompat.java
+          curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o sources/go/jslt-bundle.js
+          printf '%s  %s\n' ce1c69ad5dd4f7e82a69b7fa0b13926266606e3f3a4abd666f407c1e64dbb365 sources/go/jslt-bundle.js | sha256sum -c -
+      - name: Measure warmed Go and Java mapping/JSLT
+        run: |
+          set -euo pipefail
+          worker_jar=$(find sources/src/target -maxdepth 1 -name '*-jar-with-dependencies.jar' -print -quit)
+          test -n "$worker_jar"
+          cd sources/go
+          LOG_LEVEL=ERROR STREAMS_COMPAT_CLASSPATH="/tmp/streams-bench-compat:$GITHUB_WORKSPACE/$worker_jar" \
+            STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
+            go test -run '^$' -bench '^BenchmarkWorker' -benchtime=2s -count=3 -benchmem -timeout=10m . \
+            | tee "$GITHUB_WORKSPACE/worker-benchmarks.txt"
+          {
+            echo '### Warmed Go / Java transformation microbenchmarks'
+            echo 'Java uses persistent JVM with JSON-line IPC; not Kafka throughput or JVM heap usage.'
+            echo '~~~text'
+            grep '^BenchmarkWorker' "$GITHUB_WORKSPACE/worker-benchmarks.txt" || true
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Profile JSLT Goja CPU and allocations
+        run: |
+          set -euo pipefail
+          worker_jar=$(find sources/src/target -maxdepth 1 -name '*-jar-with-dependencies.jar' -print -quit)
+          test -n "$worker_jar"
+          cd sources/go
+          STREAMS_COMPAT_CLASSPATH="/tmp/streams-bench-compat:$GITHUB_WORKSPACE/$worker_jar" \
+            STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
+            go test -run '^NO_TESTS_MATCH' -bench '^BenchmarkWorkerJSLT/Go_goja' -benchtime=5s -count=1 \
+              -cpuprofile="$GITHUB_WORKSPACE/goja-cpu.pprof" -memprofile="$GITHUB_WORKSPACE/goja-heap.pprof" \
+              -timeout=10m . | tee "$GITHUB_WORKSPACE/goja-benchmark.txt"
+          grep '^BenchmarkWorkerJSLT/Go_goja' "$GITHUB_WORKSPACE/goja-benchmark.txt"
+          go tool pprof -top -nodecount=15 "$GITHUB_WORKSPACE/goja-cpu.pprof" > "$GITHUB_WORKSPACE/goja-cpu-top.txt"
+          go tool pprof -top -alloc_space -nodecount=15 "$GITHUB_WORKSPACE/goja-heap.pprof" > "$GITHUB_WORKSPACE/goja-alloc-top.txt"
+          {
+            echo '### Goja CPU hot spots (synthetic JSLT only)'
+            echo '~~~text'
+            cat "$GITHUB_WORKSPACE/goja-cpu-top.txt"
+            echo '~~~'
+            echo '### Goja allocation hot spots'
+            echo '~~~text'
+            cat "$GITHUB_WORKSPACE/goja-alloc-top.txt"
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: goja-jslt-profiles
+          path: |
+            goja-cpu.pprof
+            goja-heap.pprof
+            goja-cpu-top.txt
+            goja-alloc-top.txt
+            goja-benchmark.txt
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: worker-transform-benchmarks
+          path: worker-benchmarks.txt
+          retention-days: 7
+          if-no-files-found: error

@@ -12,7 +12,7 @@ cp dev-environment/k8s_tests/.env.example dev-environment/k8s_tests/.env
 
 Set the server IP address, SSH user, and K3d cluster name. SSH uses the agent or `~/.ssh/config`; set `DEV_CLUSTER_SSH_KEY` only when an explicit private-key path is needed. `DEV_CLUSTER_WORKDIR` defaults to a disposable remote checkout at `/tmp/manticore-streams-k3s`.
 
-The remote user needs Docker, Java 21, Maven, Helm, `kubectl`, and K3d. The runner adds `$HOME/.local/bin` to the remote `PATH`, uses an isolated empty Docker configuration at `$HOME/.local/share/manticore-streams/docker-anonymous` so stale credentials cannot block public base-image pulls, and synchronizes the current local working tree (excluding `.git`, artifacts, and the local `.env`). No sudo is required.
+The remote user needs Docker, Helm, `kubectl`, and K3d. The runner adds `$HOME/.local/bin` to the remote `PATH`, uses an isolated empty Docker configuration at `$HOME/.local/share/manticore-streams/docker-anonymous` so stale credentials cannot block public base-image pulls, and synchronizes the current local working tree (excluding `.git`, artifacts, and the local `.env`). No sudo is required.
 
 ## Workflow
 
@@ -29,7 +29,7 @@ Run the commands from `dev-environment/k8s_tests`:
 
 When the configured cluster is already running, `up` exits immediately without synchronizing the checkout or changing the cluster.
 
-`build` compiles the Java worker and builds the six `linux/amd64` CI images on the development server. `deploy` imports those previously built images, installs or upgrades the pinned Kafka chart and Streams Helm chart, and waits for workloads. `deploy` requires a cluster created by `up` and images created by `build`.
+`build` builds the six `linux/amd64` CI images on the development server. `deploy` imports those previously built images, installs or upgrades the pinned Kafka chart and Streams Helm chart, and waits for workloads. `deploy` requires a cluster created by `up` and images created by `build`.
 
 `test` runs the Kubernetes-only Cluster PHPUnit suite, including its `cluster_testing` seed, pipeline creation, Kafka fixture publishing, and the exact 9,418-record output assertion from CI.
 

@@ -28,6 +28,37 @@ jobs:
           cache: maven
       - run: mvn test -DskipTests=false -Dmaven.test.skip=false
         working-directory: sources/src
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: sources/go/go.mod
+          cache-dependency-path: sources/go/go.sum
+      - name: Prepare Goja JSLT tests
+        run: |
+          curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o sources/go/jslt-bundle.js
+          cd sources/go
+          printf '%s  %s\n' ce1c69ad5dd4f7e82a69b7fa0b13926266606e3f3a4abd666f407c1e64dbb365 jslt-bundle.js | sha256sum -c -
+      - run: go test ./...
+        working-directory: sources/go
+        env:
+          STREAMS_JSLT_BUNDLE: ${{ github.workspace }}/sources/go/jslt-bundle.js
+      - name: Check Go worker concurrency with the race detector
+        run: go test -race -count=1 ./...
+        working-directory: sources/go
+        env:
+          STREAMS_JSLT_BUNDLE: ${{ github.workspace }}/sources/go/jslt-bundle.js
+      # Compare only invented fixtures; production expressions remain private.
+      - name: Compare native Go JSLT and mapping with Java
+        run: |
+          set -euo pipefail
+          mvn -B -q -DskipTests -f sources/src/pom.xml compile assembly:single
+          worker_jar=$(find sources/src/target -maxdepth 1 -name '*-jar-with-dependencies.jar' -print -quit)
+          test -n "$worker_jar"
+          mkdir -p /tmp/streams-jslt-compat
+          javac -cp "$worker_jar" -d /tmp/streams-jslt-compat sources/go/compat/StreamsCompat.java
+          cd sources/go
+          STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
+            STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
+            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestUnicodeLiteralMappingParity)$' -v .
 
   image-build:
     needs: worker-tests
@@ -84,15 +115,38 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
+      - name: Build and validate worker image
+        run: |
+          docker build -t streams/worker:ci -f docker/worker/Dockerfile .
+          docker image inspect --format 'Worker image size in bytes = {{.Size}}' streams/worker:ci
+      - name: Package JSLT audit test binary and Java reference
+        run: |
+          set -euo pipefail
+          docker build --target go-test -t streams/worker-go-test:ci -f docker/worker/Dockerfile .
+          mkdir -p jslt-audit/compat
+          worker=$(docker create streams/worker:ci)
+          docker cp "$worker:/usr/src/myapp/jslt-bundle.js" jslt-audit/jslt-bundle.js
+          docker cp "$worker:/usr/src/myapp/KafkaHandler.jar" jslt-audit/KafkaHandler.jar
+          docker cp "$worker:/usr/src/myapp/compat/." jslt-audit/compat/
+          docker rm "$worker"
+          test_container=$(docker create streams/worker-go-test:ci)
+          docker cp "$test_container:/worker.test" jslt-audit/worker.test
+          docker rm "$test_container"
+          chmod +x jslt-audit/worker.test
+          tar -czf jslt-audit.tar.gz -C jslt-audit .
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - run: mvn clean compile assembly:single
-        working-directory: sources/src
-      - run: cp sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar docker/worker/KafkaHandler.jar
-      - run: docker build -t streams/worker:ci docker/worker
+          name: ci-jslt-audit
+          path: jslt-audit.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+      - name: Build JVM-free image for Kubernetes E2E
+        run: |
+          docker build --target native-runtime -t streams/worker-native:ci -f docker/worker/Dockerfile .
+          docker image inspect --format 'JVM-free worker image size in bytes = {{.Size}}' streams/worker-native:ci
+          docker tag streams/worker-native:ci streams/worker:ci
+      - name: Verify timezone support inside minimal Alpine image
+        run: docker build --target native-test -t streams/worker-native-test:ci -f docker/worker/Dockerfile .
       - name: Archive validated image
         run: |
           set -euo pipefail
@@ -133,6 +187,7 @@ jobs:
               - 'sources/**'
               - 'helm-chart/**'
               - '.github/docker-compose/laravel-tests.yml'
+              - '.github/scripts/k8s/**'
               - 'dev-environment/k8s_tests/**'
               - '.github/workflows/ci.yml'
 
@@ -258,6 +313,12 @@ jobs:
       - name: Wait for Kafka consumer assignment
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/wait-for-kafka-consumer-assignment.sh
+      - name: Report Go worker startup and verify health endpoints
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-startup.sh
+      - name: Measure JVM-free worker memory at readiness
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-memory.sh readiness
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/capture-kafka-start-offsets.sh
@@ -270,6 +331,9 @@ jobs:
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/verify-kafka-processing.sh
+      - name: Measure JVM-free worker memory after Kafka
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-memory.sh after-kafka
       - name: Collect diagnostics
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         run: bash .github/scripts/k8s/collect-diagnostics.sh artifacts/k8s

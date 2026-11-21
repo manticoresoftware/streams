@@ -195,8 +195,9 @@ spec:
           periodSeconds: {{ Values.worker.readinessProbe.periodSeconds }}
           successThreshold: {{ Values.worker.readinessProbe.successThreshold }}
           timeoutSeconds: {{ Values.worker.readinessProbe.timeoutSeconds }}
-          exec:
-            command: ['/bin/sh', '-c', '/usr/src/myapp/check.sh']
+          httpGet:
+            path: /live
+            port: 8081
         {{- end }}
         {{- if Values.worker.livenessProbe.enabled }}
         livenessProbe:
@@ -205,8 +206,9 @@ spec:
           periodSeconds: {{ Values.worker.livenessProbe.periodSeconds }}
           successThreshold: {{ Values.worker.livenessProbe.successThreshold }}
           timeoutSeconds: {{ Values.worker.livenessProbe.timeoutSeconds }}
-          exec:
-            command: ['/bin/sh', '-c', '/usr/src/myapp/check.sh']
+          httpGet:
+            path: /live
+            port: 8081
         {{- end }}
         {{- if Values.worker.startupProbe.enabled }}
         startupProbe:
@@ -215,8 +217,9 @@ spec:
           periodSeconds: {{ Values.worker.startupProbe.periodSeconds }}
           successThreshold: {{ Values.worker.startupProbe.successThreshold }}
           timeoutSeconds: {{ Values.worker.startupProbe.timeoutSeconds }}
-          exec:
-            command: [ '/bin/sh', '-c', '/usr/src/myapp/check.sh' ]
+          httpGet:
+            path: /live
+            port: 8081
         {{- end }}
         resources: {{ Values.worker.resources | toYaml 10 }}
       {{- if Values.rulesChecker.enabled }}
