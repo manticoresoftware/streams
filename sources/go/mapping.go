@@ -489,12 +489,6 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if m.passThroughWithoutRule {
 		return json.RawMessage(raw), "null", nil
 	}
-	// Jayway rejects empty and null documents before initializing its output.
-	// The legacy transformer catches that parse error and returns {} / null.
-	// This case is independent of the configured mapping and needs no JVM.
-	if trimmed := strings.TrimSpace(raw); trimmed == "" || trimmed == "null" {
-		return map[string]any{}, "null", nil
-	}
 	var doc map[string]any
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
