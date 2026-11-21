@@ -768,6 +768,50 @@ func TestReferenceTransforms(t *testing.T) {
  	}
  }
  
+// Literal Unicode JSONPath keys are common in imported customer documents.
+// Compare both the mapped/PQ payload and Kafka output with the legacy Java
+// transformer without starting Java on the actual native transform.
+func TestUnicodeLiteralMappingParity(t *testing.T) {
+	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
+		t.Skip("requires the Java compatibility oracle")
+	}
+	cases := []struct {
+		name, input, rule, fieldType string
+	}{
+		{"Cyrillic nested", `{"имя":{"название":"Привет"}}`, "имя.название => selected", "text"},
+		{"accented key", `{"café":"lait"}`, "café => selected", "text"},
+		{"Han nested", `{"漢":{"字":"値"}}`, "漢.字 => selected", "text"},
+		{"Cyrillic wildcard", `{"пункты":[{"имя":"А"},{"имя":"Б"}]}`, "пункты[*].имя => selected", "text"},
+		{"Unicode selector source", `{"тип":"http","connection":{"http":{"code":"ok"}}}`, "connection.{тип}.code => selected", "text"},
+		{"Unicode URL field", `{"ссылка":"https://example.com/path"}`, "ссылка => selected", "url"},
+	}
+	for _,tc := range cases {
+		for _,mode := range []string{"1000","0100","1010","0010"} {
+			t.Run(tc.name+"/"+mode,func(t *testing.T) {
+				m := newMapper([]string{tc.rule},map[string]string{"selected":tc.fieldType},mode)
+				defer m.reference.close()
+				if m.needsReference {
+					t.Fatal("Unicode literal key incorrectly requires Java")
+				}
+				gotMapped,gotOutput,err := m.transform(tc.input)
+				if err != nil { t.Fatal(err) }
+				if m.reference.cmd != nil {
+					t.Fatal("native Unicode mapping started Java")
+				}
+				wantMapped,wantOutput,err := m.referenceMap(tc.input)
+				if err != nil { t.Fatal(err) }
+				got,err := json.Marshal(gotMapped)
+				if err != nil { t.Fatal(err) }
+				want,err := json.Marshal(wantMapped)
+				if err != nil { t.Fatal(err) }
+				if !sameFixtureJSON(string(got),string(want)) || !sameFixtureJSON(gotOutput,wantOutput) {
+					t.Fatalf("Unicode literal mapping differs: Go mapped=%s output=%q; Java mapped=%s output=%q",got,gotOutput,want,wantOutput)
+				}
+			})
+		}
+	}
+}
+
 // Match mb_strtolower in the Java image, including contextual and multi-rune
 // mappings. Only exceptional batches need the persistent PHP process.
 var mbLower = &referenceProcess{command: func(ctx context.Context) *exec.Cmd {
