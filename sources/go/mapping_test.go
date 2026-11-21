@@ -98,6 +98,27 @@ func TestNativeExponentDynamicSelectors(t *testing.T) {
 	}
 }
 
+// Unchanged numeric fields in output modes must still use JsonIterator's
+// Java serialization, including exponent forms and exact large integers.
+func TestNativeJavaNumberSerialization(t *testing.T) {
+	m := newMapper([]string{"label => selected"}, map[string]string{"selected":"text"}, "0010")
+	defer m.reference.close()
+	_, output, err := m.transform(`{"label":"ok","number":2.5e1,"values":[1e-3,1.0,9007199254740993]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"number":25.0`, `"values":[0.001,1.0,9007199254740993]`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("output %s lacks Java numeric form %s", output, expected)
+		}
+	}
+	if m.reference.cmd != nil {
+		t.Fatal("numeric output unexpectedly started Java")
+	}
+}
+
 func TestURLHashGolden(t *testing.T) {
 	m := newMapper([]string{"link => url"}, map[string]string{"url": "url"}, "1000")
 	raw := `{"link":"Has URL to https://manticoresearch.com/section/?uri=123#anchor"}`
