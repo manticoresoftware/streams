@@ -64,15 +64,7 @@ jobs:
           cd sources/go
           STREAMS_COMPAT_CLASSPATH="/tmp/streams-bench-compat:$GITHUB_WORKSPACE/$worker_jar" \
             STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
-            go test -run '^
-          path: worker-benchmarks.txt
-          retention-days: 7
-          if-no-files-found: error
- -bench '^BenchmarkWorkerJSLT$/^Go_goja
-          path: worker-benchmarks.txt
-          retention-days: 7
-          if-no-files-found: error
- -benchtime=5s -count=1 \
+            go test -run '^NO_TESTS_MATCH' -bench '^BenchmarkWorkerJSLT/Go_goja' -benchtime=5s -count=1 \
               -cpuprofile="$GITHUB_WORKSPACE/goja-cpu.pprof" -memprofile="$GITHUB_WORKSPACE/goja-heap.pprof" \
               -timeout=10m . | tee "$GITHUB_WORKSPACE/goja-benchmark.txt"
           grep '^BenchmarkWorkerJSLT/Go_goja' "$GITHUB_WORKSPACE/goja-benchmark.txt"
@@ -90,7 +82,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         with:
-          name: goja-jSLT-profiles
+          name: goja-jslt-profiles
           path: |
             goja-cpu.pprof
             goja-heap.pprof
