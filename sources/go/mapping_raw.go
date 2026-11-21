@@ -65,6 +65,7 @@ func rawMappedObject(input json.RawMessage, javaMap bool) (string, bool) {
 		return "", false
 	}
 	var parts []string
+	seen := make(map[string]struct{})
 	for decoder.More() {
 		name, err := decoder.Token()
 		if err != nil {
@@ -74,6 +75,13 @@ func rawMappedObject(input json.RawMessage, javaMap bool) (string, bool) {
 		if !ok {
 			return "", false
 		}
+		// JSON-smart collapses duplicate object keys before converting them
+		// to Java map text. The raw Go traversal would print both, so retain
+		// the compatibility fallback instead of silently changing the value.
+		if _, duplicated := seen[key]; duplicated {
+			return "", false
+		}
+		seen[key] = struct{}{}
 		var child json.RawMessage
 		if err := decoder.Decode(&child); err != nil {
 			return "", false

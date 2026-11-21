@@ -78,6 +78,26 @@ func TestNativeObjectWildcardValues(t *testing.T) {
 	assertSameJSON(t, out, `{"selected":"One\nTwo\n"}`)
 }
 
+// Duplicate keys inside selected object values must never produce a
+// different map string when no Java runtime is available.
+func TestStrictNativeNestedDuplicateKeys(t *testing.T) {
+	t.Setenv("STREAMS_NATIVE_ONLY", "1")
+	for _,tc := range []struct{ path, doc string }{
+		{"items[*]", `{"items":[{"name":"Old","name":"New"}]}`},
+		{"items[*]", `{"items":[{"outer":{"name":"Old","name":"New"}}]}`},
+		{"groups[*].people[*]", `{"groups":[{"people":[{"name":"Old","name":"New"}]}]}`},
+	} {
+		m := newMapper([]string{tc.path+" => selected"}, map[string]string{"selected":"text"}, "1000")
+		_,_,err := m.transform(tc.doc)
+		if err == nil || !strings.Contains(err.Error(), "hybrid worker") {
+			t.Fatalf("%s: expected compatibility error, got %v", tc.path, err)
+		}
+		if m.reference.cmd != nil {
+			t.Fatal("native-only mapping started a Java process")
+		}
+	}
+}
+
 // Decimal selector values must use Java Double.toString, not the raw JSON
 // number token: Jayway resolves 1e1 as the dotted path 10.0.
 func TestNativeExponentDynamicSelectors(t *testing.T) {
@@ -530,6 +550,16 @@ func TestReferenceTransforms(t *testing.T) {
 			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
 		{"object wildcard reversed fields", `{"items":{"second":{"name":"Two"},"first":{"name":"One"}}}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
+		{"array wildcard object with duplicate keys uses Java", `{"items":[{"name":"Old","name":"New"}]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
+		{"array wildcard object with nested duplicate keys uses Java", `{"items":[{"outer":{"name":"Old","name":"New"}}]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
+		{"array wildcard array containing duplicate keys uses Java", `{"items":[[{"name":"Old","name":"New"}]]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
+		{"nested wildcard object with duplicate keys uses Java", `{"groups":[{"people":[{"name":"Old","name":"New"}]}]}`,
+			[]string{"groups[*].people[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
+		{"duplicate object field with selected leaf stays native", `{"items":[{"name":"Old","name":"New"}]}`,
+			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "1000", false},
 		{"object wildcard duplicate key uses Java", `{"items":{"first":{"name":"Old"},"first":{"name":"New"}}}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", true},
 		{"object wildcard original mode", `{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`,
