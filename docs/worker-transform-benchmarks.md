@@ -9,7 +9,7 @@ These are **isolated, warmed transformation** measurements for the [Java-to-Go m
 
 Go runs inside the test process. The Java reference runs in a separate, warmed JVM over a JSON-lines pipe. **Java timing includes IPC/serialization overhead**; therefore the benchmark measures the migration's current callable transformer paths, *not pure engine performance*. `-benchmem` reports allocations of the Go test process, **not** Java heap allocations. Never compare those allocation numbers as if they represented JVM memory.
 
-The CI worker-tests job runs three measurements per scenario at 2 seconds each, saves the raw output to the `worker-transform-benchmarks` artifact and adds the output to the job summary. Compare results on the same runner, under similar load. No private production JSLT expressions or Kafka documents are included.
+The separate benchmark workflow runs three measurements per scenario at 2 seconds each, saves the raw output to the `worker-transform-benchmarks` artifact and adds it to the job summary. It also profiles native Goja CPU and allocations with a 5-second JSLT-only run and saves the profile data and hot-spot tables as a separate artifact. Compare results on the same runner, under similar load. No private production JSLT expressions or Kafka documents are included.
 
 ## Run locally
 
