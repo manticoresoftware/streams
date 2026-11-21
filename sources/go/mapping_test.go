@@ -604,6 +604,87 @@ func TestReferenceTransforms(t *testing.T) {
 	}
 }
 
+
+ // Differentially test the inputs most likely to differ across JSON parsers:
+ // missing and mistyped fields, non-object roots, and malformed JSON. This is
+ // intentionally a synthetic corpus, not a copy of production Kafka records.
+ func TestMappingInputShapeParity(t *testing.T) {
+ 	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
+ 		t.Skip("requires compiled StreamsCompat and the Java worker JAR")
+ 	}
+ 	inputs := []struct{ name, raw string }{
+ 		{"empty object", `{}`},
+ 		{"empty input", ""},
+ 		{"whitespace only", " \t "},
+ 		{"truncated object", `{"items":`},
+ 		{"trailing comma", `{"items":[1,]}`},
+ 		{"single quotes", `{'items':['One']}`},
+ 		{"invalid suffix", `{"items":["A"]} junk`},
+ 		{"null root", `null`},
+ 		{"number root", `42`},
+ 		{"string root", `"hello"`},
+ 		{"boolean root", `true`},
+ 		{"empty array root", `[]`},
+ 		{"object array root", `[{"items":["A"]}]`},
+ 		{"null field", `{"items":null}`},
+ 		{"number field", `{"items":42}`},
+ 		{"boolean field", `{"items":true}`},
+ 		{"string field", `{"items":"hello"}`},
+ 		{"empty array field", `{"items":[]}`},
+ 		{"mixed array field", `{"items":["One",5,null,{},["Two"]]}`},
+ 		{"object field", `{"items":{"first":"One","second":"Two"}}`},
+ 		{"nested object field", `{"items":[{"name":"One"},{"name":"Two"}]}`},
+ 		{"duplicate object field", `{"items":{"name":"Old","name":"New"}}`},
+ 		{"object with exponent", `{"items":{"n":1.5e1}}`},
+ 		{"nested null", `{"groups":[{"people":null}]}`},
+ 		{"nested mixed", `{"groups":[{"people":[{"name":"Ann"},null,{"other":"x"}]},null]}`},
+ 		{"dynamic null", `{"kind":null,"connection":{}}`},
+ 		{"dynamic object", `{"kind":{"nested":"key"},"connection":{}}`},
+ 		{"dynamic array", `{"kind":["first"],"connection":{}}`},
+ 		{"dynamic exponent", `{"kind":2.5e1,"connection":{"25":{"0":{"code":"yes"}}}}`},
+ 	}
+ 	ruleSets := []struct { name string; rules []string; fields map[string]string }{
+ 		{"single wildcard", []string{"items[*] => selected"}, map[string]string{"selected":"text"}},
+ 		{"wildcard descendant", []string{"items[*].name => selected"}, map[string]string{"selected":"text"}},
+ 		{"nested wildcards", []string{"groups[*].people[*].name => selected"}, map[string]string{"selected":"text"}},
+ 		{"dynamic field", []string{"connection.{kind}.code => selected"}, map[string]string{"selected":"text"}},
+ 	}
+ 	for _, rules := range ruleSets {
+ 		for _, mode := range []string{"1000","0100","1010","0010"} {
+ 			t.Run(rules.name+"/"+mode,func(t *testing.T) {
+ 				m := newMapper(rules.rules,rules.fields,mode)
+ 				defer m.reference.close()
+ 				fallbacks := 0
+ 				for _,tc := range inputs {
+ 					t.Run(tc.name,func(t *testing.T) {
+ 						before := m.referenceCalls.Load()
+ 						mapped,output,err := m.transform(tc.raw)
+ 						if m.referenceCalls.Load() > before {
+ 							fallbacks++
+ 						}
+ 						wantMapped,wantOutput,referenceErr := m.referenceMap(tc.raw)
+ 						if (err != nil)!=(referenceErr != nil) {
+ 							t.Fatalf("native error %v, Java error %v",err,referenceErr)
+ 						}
+ 						if err != nil {
+ 							return
+ 						}
+ 						gotJSON,err := json.Marshal(mapped)
+ 						if err != nil { t.Fatal(err) }
+ 						wantJSON,err := json.Marshal(wantMapped)
+ 						if err != nil { t.Fatal(err) }
+ 						if !sameFixtureJSON(string(gotJSON),string(wantJSON)) ||
+ 							!sameFixtureJSON(output,wantOutput) {
+ 							t.Fatalf("Go/Java mapped or output JSON differs for synthetic input %s",tc.name)
+ 						}
+ 					})
+ 				}
+ 				t.Logf("%d/%d inputs required Java fallback",fallbacks,len(inputs))
+ 			})
+ 		}
+ 	}
+ }
+ 
 // Match mb_strtolower in the Java image, including contextual and multi-rune
 // mappings. Only exceptional batches need the persistent PHP process.
 var mbLower = &referenceProcess{command: func(ctx context.Context) *exec.Cmd {
