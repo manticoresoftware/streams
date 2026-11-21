@@ -1,0 +1,145 @@
+name: Full Java vs Go worker benchmark
+
+on:
+  pull_request:
+    # Expensive benchmark is run only when its implementation changes, or when
+    # a reviewer adds the benchmark-full-workers label.
+    types: [opened, synchronize, labeled]
+    paths:
+      - '.github/workflows/full-worker-benchmark.yml'
+      - '.github/scripts/k8s/full-worker-benchmark.sh'
+      - '.github/scripts/k8s/compare-full-worker-output.py'
+      - '.github/scripts/k8s/report-full-worker-benchmark.py'
+      - '.github/scripts/k8s/benchmark-jslt.jslt'
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: 'Independent Java/Go pairs per scenario'
+        type: choice
+        options: ['3', '1', '2']
+        default: '3'
+      batch_sizes:
+        description: 'Maximum batch sizes'
+        type: choice
+        options: ['2 5000', '5000', '2']
+        default: '2 5000'
+      scenarios:
+        description: 'JSLT modes'
+        type: choice
+        options: ['all', 'plain', 'jslt']
+        default: 'all'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-worker-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  k3s-compare:
+    if: >-
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event.action != 'labeled' ||
+       github.event.label.name == 'benchmark-full-workers')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      APP_NAMESPACE: manticore-streams
+      KAFKA_NAMESPACE: kafka
+      RELEASE_NAME: manticore-streams
+      KAFKA_RELEASE_NAME: my-kafka
+      KAFKA_FIXTURE_PRODUCER_POD: kafka-fixture-producer
+      TIMEOUT_SECONDS: 600
+      PIPELINE_CREATION_TIMEOUT_SECONDS: 120
+      EXPECTED_RECORDS: 9418
+      KAFKA_POD: my-kafka-controller-0
+      UI_DEPLOYMENT: manticore-streams-manticoresearch-ui
+      UI_CONTAINER: manticoresearch-ui
+      K3S_VERSION: v1.32.5+k3s1
+      K3S_BINARY_SHA256: 9624ef0534b1be432b4ce8dd94dcd7241ed02451d970a4d38943baccf5c60dce
+      BENCH_REPETITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.repetitions || '1' }}
+      BENCH_BATCH_SIZES: ${{ github.event_name == 'workflow_dispatch' && inputs.batch_sizes || '5000' }}
+      BENCH_SCENARIOS: ${{ github.event_name == 'workflow_dispatch' && inputs.scenarios || 'all' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v4.3.0
+      - name: Validate benchmark harness
+        run: |
+          set -euo pipefail
+          bash -n .github/scripts/k8s/full-worker-benchmark.sh
+          python3 -m py_compile .github/scripts/k8s/compare-full-worker-output.py \
+            .github/scripts/k8s/report-full-worker-benchmark.py
+      - name: Install K3s
+        run: bash .github/scripts/k8s/install-k3s.sh
+      - name: Materialize development chart version
+        run: bash .github/scripts/materialize-chart-version.sh
+      - name: Build native Go worker and genuine Java worker
+        run: |
+          set -euo pipefail
+          # The compat-test target contains the original Java Main/KafkaHandler
+          # and PHP 8.5 needed by the legacy mapper, NOT the Go worker binary.
+          docker build --target native-runtime -t streams/worker:ci -f docker/worker/Dockerfile .
+          docker build --target compat-test -t streams/worker-java:ci -f docker/worker/Dockerfile .
+          docker image inspect --format 'Go runtime image: {{.Size}} bytes' streams/worker:ci
+          docker image inspect --format 'Java runtime image: {{.Size}} bytes' streams/worker-java:ci
+      - name: Build shared Manticore, scaler, UI and rules-checker images
+        run: |
+          set -euo pipefail
+          for component in manticore scaler rules_checker; do
+            docker build -t "streams/$component:ci" -f "docker/$component/Dockerfile" "docker/$component"
+          done
+          for component in ui ui-nginx; do
+            cp -a ui/. "docker/$component/source/"
+            docker build -t "streams/$component:ci" -f "docker/$component/Dockerfile" "docker/$component"
+          done
+      - name: Import identical app images and both worker implementations
+        run: |
+          set -euo pipefail
+          tag=$(awk '/^appVersion:/ {print $2; exit}' helm-chart/Chart.yaml)
+          test -n "$tag"
+          for component in manticore scaler rules_checker worker ui ui-nginx; do
+            image="ghcr.io/manticoresoftware/streams/$component:$tag"
+            docker tag "streams/$component:ci" "$image"
+            docker image save "$image" | sudo k3s ctr -n k8s.io images import -
+            sudo k3s ctr -n k8s.io images list -q | grep -Fx "$image"
+          done
+          docker image save streams/worker-java:ci | sudo k3s ctr -n k8s.io images import -
+          sudo k3s ctr -n k8s.io images list -q | grep -Fx 'streams/worker-java:ci'
+      - name: Install Kafka and Streams chart
+        run: bash .github/scripts/k8s/install-streams-chart.sh
+      - name: Wait for shared UI, MySQL, columnar and scaler
+        run: bash .github/scripts/k8s/wait-for-application-workloads.sh
+      - name: Create CI Kafka test topics
+        run: bash .github/scripts/k8s/create-kafka-test-topics.sh
+      - name: Initialize the same PQ rules as Kubernetes E2E
+        run: |
+          set -euo pipefail
+          kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
+          kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- sh -c \
+            'sed -i "s/production/cluster_testing/g" .env && sed -i "s/testing/cluster_testing/g" phpunit.xml'
+          kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan db:seed --class='\TestDataSeeder' --force
+          bash .github/scripts/k8s/run-laravel-cluster-tests.sh
+      - name: Wait for generated benchmark pipeline
+        run: bash .github/scripts/k8s/wait-for-generated-pipeline.sh
+      - name: Upload public Kafka fixture to producer
+        run: bash .github/scripts/k8s/start-kafka-fixture-producer.sh
+      - name: Run sequential full-worker comparisons
+        run: bash .github/scripts/k8s/full-worker-benchmark.sh
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: bash .github/scripts/k8s/collect-diagnostics.sh artifacts/full-worker-diagnostics
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        if: always()
+        with:
+          name: full-worker-java-go-benchmark
+          path: |
+            artifacts/full-worker-benchmark/*.csv
+            artifacts/full-worker-benchmark/*.md
+            artifacts/full-worker-benchmark/*-comparison.json
+            artifacts/full-worker-benchmark/*.times
+            artifacts/full-worker-diagnostics/
+          retention-days: 7
+          if-no-files-found: warn
