@@ -118,6 +118,22 @@ func TestNativeJavaNumberSerialization(t *testing.T) {
 			t.Fatalf("mode %s unexpectedly started Java",tc.mode)
 		}
 	}
+	m := newMapper([]string{"whole_document => json"}, map[string]string{"json": "json"}, "1000")
+	mapped, output, err := m.transform(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(mapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"number":25.0`) ||
+		!strings.Contains(output, `"number":2.5e1`) {
+		t.Fatalf("whole_document numeric forms: mapped=%s output=%s", encoded, output)
+	}
+	if m.reference.cmd != nil {
+		t.Fatal("whole_document unexpectedly started Java")
+	}
 }
 
 // Scalar fields cannot be expanded by [*]; they must not require a JRE
