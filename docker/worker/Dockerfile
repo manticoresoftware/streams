@@ -57,46 +57,7 @@ ENTRYPOINT ["/usr/src/myapp/streams-worker"]
 FROM native-runtime AS native-test
 COPY --from=go-test /worker.test /worker.test
 ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
-RUN /worker.test -test.v -test.run '^(TestJSLTNamedTimeZones|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestStrictNativeMapper|TestURLHashGolden|TestNativeLowercase)
-
-FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
-RUN groupadd -r worker && useradd -r -g worker worker
-WORKDIR /usr/src/myapp
-COPY --from=compat-test /KafkaHandler.jar ./
-COPY --from=compat-test /compat ./compat
-COPY --from=go-build /streams-worker ./
-COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
-COPY docker/worker/check.sh ./
-COPY sources/go/LICENSE.jslt-js ./LICENSE.jslt-js
-USER worker
-ENTRYPOINT ["/usr/src/myapp/streams-worker"]
-
-
-FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
-RUN groupadd -r worker && useradd -r -g worker worker
-WORKDIR /usr/src/myapp
-COPY --from=compat-test /KafkaHandler.jar ./
-COPY --from=compat-test /compat ./compat
-COPY --from=go-build /streams-worker ./
-COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
-COPY docker/worker/check.sh ./
-COPY sources/go/LICENSE.jslt-js ./LICENSE.jslt-js
-USER worker
-ENTRYPOINT ["/usr/src/myapp/streams-worker"]
-
-
-FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
-RUN groupadd -r worker && useradd -r -g worker worker
-WORKDIR /usr/src/myapp
-COPY --from=compat-test /KafkaHandler.jar ./
-COPY --from=compat-test /compat ./compat
-COPY --from=go-build /streams-worker ./
-COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
-COPY docker/worker/check.sh ./
-COPY sources/go/LICENSE.jslt-js ./LICENSE.jslt-js
-USER worker
-ENTRYPOINT ["/usr/src/myapp/streams-worker"]
-
+RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestStrictNativeMapper|TestURLHashGolden|TestNativeLowercase)$"]
 
 FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
 RUN groupadd -r worker && useradd -r -g worker worker
