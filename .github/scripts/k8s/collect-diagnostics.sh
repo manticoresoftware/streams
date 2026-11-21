@@ -16,6 +16,13 @@ for namespace in "$APP_NAMESPACE" "$KAFKA_NAMESPACE"; do
     (
       kubectl --request-timeout="$KUBECTL_TIMEOUT" describe -n "$namespace" "$pod" >"$ARTIFACT_DIR/${namespace}-${safe_name}-describe.txt" 2>&1 || true
       kubectl --request-timeout="$KUBECTL_TIMEOUT" logs -n "$namespace" "$pod" --all-containers=true --prefix=true --tail=200 >"$ARTIFACT_DIR/${namespace}-${safe_name}-logs.txt" 2>&1 || true
+      # The current logs omit the cause of a prior container crash. Capture
+      # the last failed instance separately for any container that restarted.
+      kubectl --request-timeout="$KUBECTL_TIMEOUT" get -n "$namespace" "$pod" -o jsonpath='{range .status.containerStatuses[*]}{.name}{" "}{.restartCount}{"\\n"}{end}' 2>/dev/null |
+        while read -r container restarts; do
+          case "$restarts" in ''|0) continue ;; esac
+          kubectl --request-timeout="$KUBECTL_TIMEOUT" logs -n "$namespace" "$pod" -c "$container" --previous --prefix=true --tail=1000 >"$ARTIFACT_DIR/${namespace}-${safe_name}-${container}-previous-logs.txt" 2>&1 || true
+        done
     ) &
   done
   wait

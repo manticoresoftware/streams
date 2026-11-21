@@ -142,15 +142,28 @@ prepare_backlog() {
   return 1
 }
 
+# Stop on worker restart: outputs from multiple container instances do not
+# provide comparable elapsed time, CPU usage or peak RSS measurements.
+worker_restarts() {
+  kubectl -n "$APP_NAMESPACE" get "pod/$PIPELINE-0" -o json 2>/dev/null |
+    jq -r --arg worker "$worker_name" '[.status.containerStatuses[]? | select(.name == $worker) | .restartCount][0] // 0'
+}
+
 # Poll Kafka from the same K3s cluster. Capture first and final output times
 # before starting the worker; kubectl rollout status alone would miss the
 # earliest output when the backlog is already present.
 monitor_output() {
   local output=$1 result_file=$2 deadline=$((SECONDS + TIMEOUT_SECONDS))
-  local n first=0 current_ms
+  local n first=0 current_ms restarts
   while (( SECONDS < deadline )); do
     n=$(topic_offset "$output" || echo 0)
     current_ms=$(date +%s%3N)
+    restarts=$(worker_restarts || true)
+    if [[ "$restarts" =~ ^[0-9]+$ ]] && (( restarts > 0 )); then
+      echo "Worker $worker_name restarted $restarts time(s) while processing $output; benchmark invalid" >&2
+      kubectl -n "$APP_NAMESPACE" logs "pod/$PIPELINE-0" -c "$worker_name" --previous --tail=250 >&2 || true
+      return 1
+    fi
     if (( n > 0 && first == 0 )); then
       first=$current_ms
     fi
