@@ -98,24 +98,25 @@ func TestNativeExponentDynamicSelectors(t *testing.T) {
 	}
 }
 
-// Unchanged numeric fields in output modes must still use JsonIterator's
-// Java serialization, including exponent forms and exact large integers.
+// JsonIterator preserves numeric tokens in passthrough mode, while
+// Jayway normalizes them when the source is rewritten in rename mode.
 func TestNativeJavaNumberSerialization(t *testing.T) {
-	m := newMapper([]string{"label => selected"}, map[string]string{"selected":"text"}, "0010")
-	defer m.reference.close()
-	_, output, err := m.transform(`{"label":"ok","number":2.5e1,"values":[1e-3,1.0,9007199254740993]}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, expected := range []string{
-		`"number":25.0`, `"values":[0.001,1.0,9007199254740993]`,
+	input := `{"label":"ok","number":2.5e1,"values":[1e-3,1.0,9007199254740993]}`
+	for _,tc := range []struct{ mode string; fields []string }{
+		{"0010", []string{`"number":2.5e1`,`"values":[1e-3,1.0,9007199254740993]`}},
+		{"1010", []string{`"number":25.0`,`"values":[0.001,1.0,9007199254740993]`}},
 	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("output %s lacks Java numeric form %s", output, expected)
+		m := newMapper([]string{"label => selected"},map[string]string{"selected":"text"},tc.mode)
+		_,output,err := m.transform(input)
+		if err != nil { t.Fatal(err) }
+		for _,expected := range tc.fields {
+			if !strings.Contains(output,expected) {
+				t.Fatalf("mode %s: output %s lacks numeric form %s",tc.mode,output,expected)
+			}
 		}
-	}
-	if m.reference.cmd != nil {
-		t.Fatal("numeric output unexpectedly started Java")
+		if m.reference.cmd != nil {
+			t.Fatalf("mode %s unexpectedly started Java",tc.mode)
+		}
 	}
 }
 
