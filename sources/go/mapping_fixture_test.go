@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -15,9 +14,9 @@ import (
 	"testing"
 )
 
-// The repository's Kafka fixture has 43,403 public documents. Check how often
-// the Go mapper still needs Java on realistic input without logging document
-// contents. This audit can be removed once every fallback is eliminated.
+// Guard the JVM-free runtime against mapping fallback regressions on the
+// repository's 43,403 public Kafka documents. Also compare sampled mapped and
+// output JSON with Java without logging document contents.
 func TestFixtureMappingFallbacks(t *testing.T) {
 	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
 		t.Skip("requires Java compatibility oracle")
@@ -114,8 +113,12 @@ func TestFixtureMappingFallbacks(t *testing.T) {
 	if len(shown) > maxOffsets {
 		shown = shown[:maxOffsets]
 	}
-	t.Log(fmt.Sprintf("%d Kafka fixture records; %d native Java fallback calls; %d Java output comparisons; first fallback record numbers: %v",
-		count, len(fallbackOffsets), compared, shown))
+	if len(fallbackOffsets) != 0 {
+		t.Fatalf("%d of %d Kafka fixture records required Java fallback; first record numbers: %v",
+			len(fallbackOffsets), count, shown)
+	}
+	t.Logf("%d Kafka fixture records; zero native Java fallbacks; %d Java output comparisons",
+		count, compared)
 }
 
 // Compare decoded JSON so insignificant object-key order does not cause false
