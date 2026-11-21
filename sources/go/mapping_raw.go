@@ -188,48 +188,51 @@ func compileRawWildcardSteps(path string) ([]rawWildcardStep, bool) {
 // Jayway's [*] selector also iterates values of JSON objects. Read those
 // directly from the source document to retain their ordering and exact text.
 // A duplicated object key is left to the Java bridge because JSON parsers
-// differ in which occurrence they retain.
-func rawWildcardValues(input json.RawMessage) ([]json.RawMessage, bool) {
+// differ in which occurrence they retain. The final boolean signals that case.
+func rawWildcardValues(input json.RawMessage) ([]json.RawMessage, bool, bool) {
 	input = bytes.TrimSpace(input)
 	if len(input) == 0 {
-		return nil, false
+		return nil, false, false
 	}
 	if input[0] == '[' {
 		var values []json.RawMessage
 		if err := json.Unmarshal(input, &values); err != nil {
-			return nil, false
+			return nil, false, false
 		}
-		return values, true
+		return values, true, false
 	}
 	if input[0] != '{' {
-		return nil, false
+		return nil, false, false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(input))
 	if _, err := decoder.Token(); err != nil {
-		return nil, false
+		return nil, false, false
 	}
 	var values []json.RawMessage
 	seen := make(map[string]bool)
 	for decoder.More() {
 		keyToken, err := decoder.Token()
 		if err != nil {
-			return nil, false
+			return nil, false, false
 		}
 		key, ok := keyToken.(string)
-		if !ok || seen[key] {
-			return nil, false
+		if !ok {
+			return nil, false, false
+		}
+		if seen[key] {
+			return nil, false, true
 		}
 		seen[key] = true
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
-			return nil, false
+			return nil, false, false
 		}
 		values = append(values, value)
 	}
 	if _, err := decoder.Token(); err != nil {
-		return nil, false
+		return nil, false, false
 	}
-	return values, true
+	return values, true, false
 }
 
 func selectRawNestedWildcards(raw string, steps []rawWildcardStep) (string, bool, bool) {
@@ -242,7 +245,10 @@ func selectRawNestedWildcards(raw string, steps []rawWildcardStep) (string, bool
 				continue
 			}
 			if step.expand {
-				elements, ok := rawWildcardValues(value)
+				elements, ok, incompatible := rawWildcardValues(value)
+				if incompatible {
+					return "", false, false
+				}
 				if !ok {
 					continue
 				}
@@ -279,7 +285,7 @@ func selectRawWildcard(raw string, keys []string, wildcard int) (string, bool, b
 		}
 		current = value
 	}
-	items, ok := rawWildcardValues(current)
+	items, ok, _ := rawWildcardValues(current)
 	if !ok {
 		return "", false, false
 	}
