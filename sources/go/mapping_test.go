@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -729,6 +730,39 @@ func TestReferenceTransforms(t *testing.T) {
  					})
  				}
  				t.Logf("%d/%d inputs required Java fallback",fallbacks,len(inputs))
+ 			})
+ 		}
+ 	}
+ }
+ 
+
+ // The Java transformer handles empty and null inputs before selecting any
+ // JSONPath. These documents should behave identically in the JVM-free image.
+ func TestNativeEmptyDocumentsMatchJava(t *testing.T) {
+ 	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
+ 		t.Skip("requires Java compatibility oracle")
+ 	}
+ 	for _,mode := range []string{"1000", "0100", "1010", "0010", "0011"} {
+ 		for _,raw := range []string{"", " \t \n", "null", " \n null \t"} {
+ 			t.Run(mode+"/"+strconv.Quote(raw),func(t *testing.T) {
+ 				m := newMapper([]string{"title => title"},map[string]string{"title":"text"},mode)
+ 				defer m.reference.close()
+ 				t.Setenv("STREAMS_NATIVE_ONLY","1")
+ 				gotMapped,gotOutput,err := m.transform(raw)
+ 				if err != nil { t.Fatal(err) }
+ 				if m.reference.cmd != nil {
+ 					t.Fatal("empty input started the Java bridge")
+ 				}
+ 				t.Setenv("STREAMS_NATIVE_ONLY","0")
+ 				wantMapped,wantOutput,err := m.referenceMap(raw)
+ 				if err != nil { t.Fatal(err) }
+ 				got,err := json.Marshal(gotMapped)
+ 				if err != nil { t.Fatal(err) }
+ 				want,err := json.Marshal(wantMapped)
+ 				if err != nil { t.Fatal(err) }
+ 				if !sameFixtureJSON(string(got),string(want)) || gotOutput != wantOutput {
+ 					t.Fatalf("Go mapped=%s output=%q, Java mapped=%s output=%q",got,gotOutput,want,wantOutput)
+ 				}
  			})
  		}
  	}
