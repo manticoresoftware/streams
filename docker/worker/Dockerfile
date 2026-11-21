@@ -5,8 +5,10 @@ RUN apt-get update \
         lsb-release \
         wget \
         default-mysql-client \
-        software-properties-common \
-    && add-apt-repository -y ppa:ondrej/php \
+    && wget -qO /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb \
+    && dpkg -i /tmp/debsuryorg-archive-keyring.deb && rm /tmp/debsuryorg-archive-keyring.deb \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/php.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         php8.5-cli \
