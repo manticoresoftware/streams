@@ -4,12 +4,15 @@ import (
 	"archive/tar"
 	"bufio"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"testing"
 	"path"
+	"reflect"
+	"strings"
+	"testing"
 )
 
 // The repository's Kafka fixture has 43,403 public documents. Check how often
@@ -65,16 +68,39 @@ func TestFixtureMappingFallbacks(t *testing.T) {
 
 	scanner := bufio.NewScanner(records)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
-	count := 0
+	count, compared := 0, 0
 	var fallbackOffsets []int
 	for scanner.Scan() {
 		count++
+		raw := scanner.Text()
 		before := m.referenceCalls.Load()
-		if _, _, err := m.transform(scanner.Text()); err != nil {
+		mapped, output, err := m.transform(raw)
+		if err != nil {
 			t.Fatalf("mapping fixture record %d: %v", count, err)
 		}
 		if m.referenceCalls.Load() != before {
 			fallbackOffsets = append(fallbackOffsets, count)
+		}
+		// Verify outputs as well as the fallback count. A fixed stride covers
+		// the entire public fixture without starting Java for every record.
+		if count == 1 || count%173 == 0 || count == 43403 {
+			wantMapped, wantOutput, err := m.referenceMap(raw)
+			if err != nil {
+				t.Fatalf("Java reference for fixture record %d: %v", count, err)
+			}
+			got, err := json.Marshal(mapped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(wantMapped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !sameFixtureJSON(string(got), string(want)) || !sameFixtureJSON(output, wantOutput) {
+				// The fixture is public, but do not print raw Kafka records in CI logs.
+				t.Fatalf("Java/Go mapping differs for fixture record %d", count)
+			}
+			compared++
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -88,6 +114,23 @@ func TestFixtureMappingFallbacks(t *testing.T) {
 	if len(shown) > maxOffsets {
 		shown = shown[:maxOffsets]
 	}
-	t.Log(fmt.Sprintf("%d Kafka fixture records; %d Java fallback calls; first record numbers: %v",
-		count, m.referenceCalls.Load(), shown))
+	t.Log(fmt.Sprintf("%d Kafka fixture records; %d native Java fallback calls; %d Java output comparisons; first fallback record numbers: %v",
+		count, len(fallbackOffsets), compared, shown))
+}
+
+// Compare decoded JSON so insignificant object-key order does not cause false
+// positives, while json.Number preserves large integer precision and format.
+func sameFixtureJSON(a, b string) bool {
+	parse := func(s string) (any, error) {
+		decoder := json.NewDecoder(strings.NewReader(s))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		return value, nil
+	}
+	left, leftErr := parse(a)
+	right, rightErr := parse(b)
+	return leftErr == nil && rightErr == nil && reflect.DeepEqual(left, right)
 }
