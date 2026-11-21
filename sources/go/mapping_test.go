@@ -675,7 +675,7 @@ func TestReferenceTransforms(t *testing.T) {
  						if err != nil { t.Fatal(err) }
  						if !sameFixtureJSON(string(gotJSON),string(wantJSON)) ||
  							!sameFixtureJSON(output,wantOutput) {
- 							t.Fatalf("Go/Java mapped or output JSON differs for synthetic input %s",tc.name)
+ 							t.Fatalf("Java/Go mismatch on synthetic %s: Go mapped=%s output=%q; Java mapped=%s output=%q",tc.name,string(gotJSON),output,string(wantJSON),wantOutput)
  						}
  					})
  				}
