@@ -57,7 +57,7 @@ ENTRYPOINT ["/usr/src/myapp/streams-worker"]
 FROM native-runtime AS native-test
 COPY --from=go-test /worker.test /worker.test
 ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
-RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestNativeScalarWildcardInputs|TestStrictNativeMapper|TestStrictNativeMalformedDocuments|TestStrictNativeNonObjectRoots|TestStrictNativeNestedDuplicateKeys|TestURLHashGolden|TestNativeLowercase)$"]
+RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestJSLTReplaceRegexCacheParity|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestNativeScalarWildcardInputs|TestStrictNativeMapper|TestStrictNativeMalformedDocuments|TestStrictNativeNonObjectRoots|TestStrictNativeNestedDuplicateKeys|TestURLHashGolden|TestNativeLowercase)$"]
 
 FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
 RUN groupadd -r worker && useradd -r -g worker worker

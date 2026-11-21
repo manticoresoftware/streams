@@ -58,6 +58,29 @@ func patchDateLiterals(bundle string) (string, error) {
 	return strings.Replace(bundle, target, patched, 1), nil
 }
 
+// The pinned jslt-js bundle caches parsed patterns, but replace() creates
+// another global RegExp for every document. A Goja runtime is used by one
+// synchronized worker, so we can reuse this matcher after resetting lastIndex.
+// The cache is bounded because JSLT rules may use data-dependent patterns.
+func patchJSLTReplaceCache(bundle string) (string, error) {
+	const cache = "const regexpCache = new BoundedCache(1000);"
+	const oldReplace = "    const pattern = getRegexp(regexp);\n" +
+		"    const re = new RegExp(pattern.source, pattern.flags + \"g\"); // stateful clone for iteration"
+	if strings.Count(bundle, cache) != 1 || strings.Count(bundle, oldReplace) != 1 {
+		return "", fmt.Errorf("unexpected jslt-js bundle layout; cannot cache replace patterns")
+	}
+	bundle = strings.Replace(bundle, cache,
+		cache+"\nconst replaceRegexpCache = new BoundedCache(128);", 1)
+	const newReplace = "    const pattern = getRegexp(regexp);\n" +
+		"    let re = replaceRegexpCache.get(regexp);\n" +
+		"    if (re == null) {\n" +
+		"      re = new RegExp(pattern.source, pattern.flags + \"g\");\n" +
+		"      replaceRegexpCache.put(regexp, re);\n" +
+		"    }\n" +
+		"    re.lastIndex = 0; // each call gets fresh matcher state"
+	return strings.Replace(bundle, oldReplace, newReplace, 1), nil
+}
+
 var fixedTZ = regexp.MustCompile("^([+-])(\\d\\d):(\\d\\d)$")
 
 func jsltTimezone(zone string) (*time.Location, error) {
@@ -225,6 +248,10 @@ func newJSLT(config string) (func(string) (string, error), error) {
 		return nil, fmt.Errorf("read JSLT runtime: %w", err)
 	}
 	bundle, err := patchDateLiterals(string(b))
+	if err != nil {
+		return nil, err
+	}
+	bundle, err = patchJSLTReplaceCache(bundle)
 	if err != nil {
 		return nil, err
 	}

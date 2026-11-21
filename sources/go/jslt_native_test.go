@@ -90,6 +90,61 @@ func TestJSLTReviverFastPath(t *testing.T) {
 	}
 }
 
+// replace() reuses a compiled global regex in Goja. Alternating dynamic
+// regexps must not leak lastIndex state across input documents or patterns.
+func TestJSLTReplaceRegexCacheParity(t *testing.T) {
+	if os.Getenv("STREAMS_JSLT_BUNDLE") == "" {
+		t.Skip("requires the pinned jslt-js bundle")
+	}
+	const expression = `{"clean":replace(.text,.pattern,.replacement)}`
+	transform, err := newJSLT(expression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reference *referenceProcess
+	if os.Getenv("STREAMS_COMPAT_CLASSPATH") != "" {
+		reference = javaReference("jslt", expression)
+		defer reference.close()
+	}
+	cases := []struct{ input, output string }{
+		{`{"text":"<b>Hello</b> café","pattern":"<[^>]+>","replacement":""}`, `{"clean":"Hello café"}`},
+		{`{"text":"foo foo","pattern":"foo","replacement":"bar"}`, `{"clean":"bar bar"}`},
+		{`{"text":"<i>One</i>","pattern":"<[^>]+>","replacement":""}`, `{"clean":"One"}`},
+		{`{"text":"ab12cd34","pattern":"[0-9]+","replacement":"#"}`, `{"clean":"ab#cd#"}`},
+		{`{"text":"a  b   c","pattern":"\\s+","replacement":" "}`, `{"clean":"a b c"}`},
+		{`{"text":"foo","pattern":"foo","replacement":"x"}`, `{"clean":"x"}`},
+	}
+	for pass := 0; pass < 3; pass++ {
+		for _, tc := range cases {
+			got, err := transform(tc.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !sameFixtureJSON(got, tc.output) {
+				t.Fatalf("Goja regex cache mismatch: got %s expected %s", got, tc.output)
+			}
+			if reference != nil {
+				want, err := reference.call(tc.input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !sameFixtureJSON(got, want) {
+					t.Fatalf("Goja/Java replace differs: got %s Java %s", got, want)
+				}
+			}
+		}
+	}
+	zeroLength := `{"text":"abc","pattern":"^","replacement":"x"}`
+	if _, err := transform(zeroLength); err == nil {
+		t.Fatal("zero-length regex match must remain an error")
+	}
+	if reference != nil {
+		if _, err := reference.call(zeroLength); err == nil {
+			t.Fatal("Java must reject a zero-length regex match")
+		}
+	}
+}
+
 // Compare numeric JSON values mathematically (1.0 == 1e0), without
 // rounding long integers through float64 as JavaScript JSON.parse would.
 func equivalentJSLTValue(left, right any) bool {
