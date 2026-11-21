@@ -674,8 +674,11 @@ func TestReferenceTransforms(t *testing.T) {
  						if err != nil { t.Fatal(err) }
  						wantJSON,err := json.Marshal(wantMapped)
  						if err != nil { t.Fatal(err) }
- 						if !sameFixtureJSON(string(gotJSON),string(wantJSON)) ||
- 							!sameFixtureJSON(output,wantOutput) {
+ 						outputsEqual := output == wantOutput
+ 						if json.Valid([]byte(output)) && json.Valid([]byte(wantOutput)) {
+ 							outputsEqual = sameFixtureJSON(output,wantOutput)
+ 						}
+ 						if !sameFixtureJSON(string(gotJSON),string(wantJSON)) || !outputsEqual {
  							t.Fatalf("Java/Go mismatch on synthetic %s: Go mapped=%s output=%q; Java mapped=%s output=%q",tc.name,string(gotJSON),output,string(wantJSON),wantOutput)
  						}
  					})
