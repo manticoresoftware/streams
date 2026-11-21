@@ -63,6 +63,27 @@ func TestNativeMappingAndOutput(t *testing.T) {
 	}
 }
 
+// Decimal selector values must use Java Double.toString, not the raw JSON
+// number token: Jayway resolves 1e1 as the dotted path 10.0.
+func TestNativeExponentDynamicSelectors(t *testing.T) {
+	for _, tc := range []struct{ value, connection string }{
+		{"1e1", `{"10":{"0":{"code":"yes"}}}`},
+		{"1e-3", `{"0":{"001":{"code":"yes"}}}`},
+		{"2.5e1", `{"25":{"0":{"code":"yes"}}}`},
+	} {
+		m := newMapper([]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "1000")
+		input := `{"kind":` + tc.value + `,"connection":` + tc.connection + `}`
+		_, out, err := m.transform(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.reference.cmd != nil {
+			t.Fatalf("selector %s unexpectedly started Java", tc.value)
+		}
+		assertSameJSON(t, out, `{"selected":"yes"}`)
+	}
+}
+
 func TestURLHashGolden(t *testing.T) {
 	m := newMapper([]string{"link => url"}, map[string]string{"url": "url"}, "1000")
 	raw := `{"link":"Has URL to https://manticoresearch.com/section/?uri=123#anchor"}`
@@ -457,6 +478,12 @@ func TestReferenceTransforms(t *testing.T) {
 			[]string{"items[*] => selected"}, map[string]string{"selected":"text"}, "1000", false},
 		{"numeric dynamic selector", `{"kind":12,"connection":{"12":{"code":"yes"}}}`,
 			[]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "1000", false},
+		{"exponent dynamic selector", `{"kind":1e1,"connection":{"10":{"0":{"code":"yes"}}}}`,
+			[]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "1000", false},
+		{"negative exponent dynamic selector", `{"kind":1e-3,"connection":{"0":{"001":{"code":"yes"}}}}`,
+			[]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "0100", false},
+		{"fractional exponent dynamic selector", `{"kind":2.5e1,"connection":{"25":{"0":{"code":"yes"}}}}`,
+			[]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "1010", false},
 		{"boolean dynamic selector", `{"kind":true,"connection":{"true":{"code":"yes"}}}`,
 			[]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "1000", false},
 		{"dotted dynamic selector", `{"kind":"a.b","connection":{"a":{"b":{"code":"yes"}}}}`,
