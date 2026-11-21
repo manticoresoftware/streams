@@ -311,6 +311,27 @@ func sourceCopyValue(v any) any {
 	}
 }
 
+// JsonIterator/JsonStream serialize decimal and exponent tokens using Java's
+// numeric representation. Preserve integer precision while normalizing JSON
+// documents copied to Kafka output or mapped via whole_document.
+func normalizeJavaJSONNumbers(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			v[key] = normalizeJavaJSONNumbers(child)
+		}
+	case []any:
+		for i, child := range v {
+			v[i] = normalizeJavaJSONNumbers(child)
+		}
+	case json.Number:
+		if normalized, ok := javaNumberText(v.String()); ok {
+			return json.Number(normalized)
+		}
+	}
+	return value
+}
+
 func deleteMappedPath(obj map[string]any, keys []string) {
 	parent, _ := lookupMappedPath(obj, keys[:len(keys)-1])
 	if p, ok := parent.(map[string]any); ok {
@@ -474,6 +495,15 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if err := decoder.Decode(&doc); err != nil || doc == nil || strings.TrimSpace(raw[decoder.InputOffset():]) != "" {
 		return m.referenceMap(raw)
 	}
+	normalizeJavaJSONNumbers(doc)
+	originalOutput := raw
+	if m.output[2] == '1' {
+		encoded, err := json.Marshal(doc)
+		if err != nil {
+			return m.referenceMap(raw)
+		}
+		originalOutput = string(encoded)
+	}
 	mapped := map[string]any{}
 	out := map[string]any{}
 	rename := m.output[0] == '1' && m.output[2] == '1'
@@ -513,7 +543,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 						key = strconv.FormatBool(v)
 					case nil:
 						// In Java, null.toString() aborts the mapping loop.
-						return m.abortMapping(raw, mapped, out)
+						return m.abortMapping(originalOutput, mapped, out)
 					default:
 						return m.referenceMap(raw)
 					}
@@ -533,7 +563,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			// missing field type, even when the selected JSON path is absent.
 			// Preserve the already mapped fields without launching Java.
 			if !rule.hasType {
-				return m.abortMapping(raw, mapped, out)
+				return m.abortMapping(originalOutput, mapped, out)
 			}
 			if rule.isURL {
 				if len(path.urlCollectionPrefix) > 0 {
@@ -541,7 +571,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					if present {
 						_, isArray := root.([]any)
 						if !path.urlCollectionArrayOnly || isArray {
-							return m.abortMapping(raw, mapped, out)
+							return m.abortMapping(originalOutput, mapped, out)
 						}
 					}
 					value = ""
@@ -569,7 +599,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					// throw PathNotFoundException and processing continues.
 					if _, present := lookupMappedPath(doc, keys[:path.wildcard+1]); present {
 						if m.output[2] == '1' {
-							return mapped, raw, nil
+							return mapped, originalOutput, nil
 						}
 						b, err := json.Marshal(out)
 						return mapped, string(b), err
@@ -582,7 +612,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					if !ok {
 						// Java attempts to assign the JSONPath value to String.
 						// A non-string aborts the current document's mapping loop.
-						return m.abortMapping(raw, mapped, out)
+						return m.abortMapping(originalOutput, mapped, out)
 					}
 					if !mapURLs(s, rule.target, mapped) {
 						return m.referenceMap(raw)
@@ -639,7 +669,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if !rename && m.output[0] == '1' {
 		out = mapped
 	} else if !rename && m.output[2] == '1' {
-		return mapped, raw, nil
+		return mapped, originalOutput, nil
 	}
 	b, err := json.Marshal(out)
 	return mapped, string(b), err
