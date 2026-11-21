@@ -501,6 +501,10 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	normalizeJavaJSONNumbers(doc)
 	originalOutput := raw
 	mapped := map[string]any{}
+	// JsonIterator keeps whole_document's original number tokens when
+	// serializing the new-only Kafka output, but the mapped/PQ representation
+	// is decoded and normalized by the legacy transformer.
+	rawWholeDocuments := make(map[string]json.RawMessage)
 	out := map[string]any{}
 	rename := m.output[0] == '1' && m.output[2] == '1'
 	original := m.output[1] == '1'
@@ -517,6 +521,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			keys := path.keys
 			if len(keys) == 1 && keys[0] == "whole_document" {
 				mapped[rule.target] = doc
+				rawWholeDocuments[rule.target] = json.RawMessage(raw)
 				continue
 			}
 			if path.placeholder != "" {
@@ -664,6 +669,12 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	}
 	if !rename && m.output[0] == '1' {
 		out = mapped
+		if len(rawWholeDocuments) > 0 {
+			out = sourceCopy(mapped)
+			for field, source := range rawWholeDocuments {
+				out[field] = source
+			}
+		}
 	} else if !rename && m.output[2] == '1' {
 		return mapped, originalOutput, nil
 	}
