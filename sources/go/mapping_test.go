@@ -74,7 +74,7 @@ func TestNativeObjectWildcardValues(t *testing.T) {
 	if m.reference.cmd != nil {
 		t.Fatal("object wildcard unexpectedly started Java")
 	}
-	assertSameJSON(t, out, `{"selected":"One\\nTwo\\n"}`)
+	assertSameJSON(t, out, `{"selected":"One\nTwo\n"}`)
 }
 
 // Decimal selector values must use Java Double.toString, not the raw JSON
