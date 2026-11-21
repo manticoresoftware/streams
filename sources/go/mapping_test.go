@@ -701,13 +701,13 @@ func TestReferenceTransforms(t *testing.T) {
  			t.Run(rules.name+"/"+mode,func(t *testing.T) {
  				m := newMapper(rules.rules,rules.fields,mode)
  				defer m.reference.close()
- 				fallbacks := 0
+ 				fallbackNames := make([]string, 0)
  				for _,tc := range inputs {
  					t.Run(tc.name,func(t *testing.T) {
  						before := m.referenceCalls.Load()
  						mapped,output,err := m.transform(tc.raw)
  						if m.referenceCalls.Load() > before {
- 							fallbacks++
+ 							fallbackNames = append(fallbackNames, tc.name)
  						}
  						wantMapped,wantOutput,referenceErr := m.referenceMap(tc.raw)
  						if (err != nil)!=(referenceErr != nil) {
@@ -729,7 +729,7 @@ func TestReferenceTransforms(t *testing.T) {
  						}
  					})
  				}
- 				t.Logf("%d/%d inputs required Java fallback",fallbacks,len(inputs))
+ 				t.Logf("%d/%d inputs required Java fallback: %v",len(fallbackNames),len(inputs),fallbackNames)
  			})
  		}
  	}
@@ -753,6 +753,55 @@ func TestStrictNativeMalformedDocuments(t *testing.T) {
 					t.Fatal("strict native mode unexpectedly started Java")
 				}
 			})
+		}
+	}
+}
+
+// Non-object roots fail Java's Map cast in no-transform modes before
+// any rules execute. Verify that the native worker reproduces both outputs.
+func TestNativeNonObjectNoTransformParity(t *testing.T) {
+	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
+		t.Skip("requires the Java compatibility oracle")
+	}
+	cases := []struct{ name, raw string }{
+		{"integer", `42`},
+		{"string", `"hello"`},
+		{"boolean", `true`},
+		{"empty array", `[]`},
+		{"array of objects", `[{"items":["One"]}]`},
+	}
+	for _, mode := range []string{"0010", "0011", "1010", "1011"} {
+		for _, input := range cases {
+			t.Run(mode+"/"+input.name, func(t *testing.T) {
+			m := newMapper([]string{"whole_document => json", "items[*] => selected"},
+				map[string]string{"json": "json", "selected": "text"}, mode)
+			defer m.reference.close()
+			t.Setenv("STREAMS_NATIVE_ONLY", "1")
+			gotMapped, gotOutput, err := m.transform(input.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.reference.cmd != nil {
+				t.Fatal("native mapper started Java on a non-object root")
+			}
+			t.Setenv("STREAMS_NATIVE_ONLY", "0")
+			wantMapped, wantOutput, err := m.referenceMap(input.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := json.Marshal(gotMapped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(wantMapped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !sameFixtureJSON(string(got), string(want)) || gotOutput != wantOutput {
+				t.Fatalf("non-object root: Go mapped=%s output=%q; Java mapped=%s output=%q",
+					got, gotOutput, want, wantOutput)
+			}
+		})
 		}
 	}
 }

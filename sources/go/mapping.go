@@ -489,6 +489,17 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if m.passThroughWithoutRule {
 		return json.RawMessage(raw), "null", nil
 	}
+	// For no-transform modes, the Java worker casts the JSON root to Map
+	// before running any mapping rule. Valid scalar and array roots fail that
+	// cast; their mapped result is empty and the output is null. Malformed
+	// and null JSON documents still require the Java compatibility path.
+	if m.output[2] == '1' {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed != "" && trimmed != "null" && trimmed[0] != '{' &&
+			json.Valid([]byte(trimmed)) {
+			return map[string]any{}, "null", nil
+		}
+	}
 	var doc map[string]any
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()

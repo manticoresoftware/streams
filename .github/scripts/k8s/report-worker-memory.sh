@@ -23,9 +23,17 @@ awk -v stage="$stage" -v rss="$rss_kb" -v hwm="$hwm_kb" 'BEGIN {
 worker_api="/api/v1/namespaces/$APP_NAMESPACE/pods/$pod:8081/proxy/metrics"
 if metrics=$(kubectl get --raw "$worker_api" 2>/dev/null); then
   heap_bytes=$(awk '$1 ~ /^worker_consumption_ram/ {print $2; exit}' <<<"$metrics")
-  if [[ "$heap_bytes" =~ ^[0-9]+([.][0-9]+)?$ ]] && [[ "$heap_bytes" != "0" ]]; then
+  # Prometheus can expose large values in scientific notation (e.g. 2e+07).
+  if [[ "$heap_bytes" =~ ^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$ ]]; then
     awk -v stage="$stage" -v heap="$heap_bytes" 'BEGIN {
-      printf "Go worker live heap objects (%s): %.2f MiB (last metrics sample)\n", stage, heap / 1048576
+      if (heap + 0 > 0)
+        printf "Go worker live heap objects (%s): %.2f MiB (last metrics sample)\n", stage, heap / 1048576
+      else
+        printf "Go worker live heap objects (%s): not sampled yet\n", stage
     }'
+  else
+    echo "Go worker live heap metric not found in worker /metrics" >&2
   fi
+else
+  echo "Go worker /metrics not available for memory sampling" >&2
 fi
