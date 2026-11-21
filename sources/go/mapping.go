@@ -52,9 +52,9 @@ var simpleKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // rule lacks [*], Java tries to assign them to String and skips that value.
 var javaCollectionSelector = regexp.MustCompile(`\[\?\(|\[(?:[0-9]*:[0-9]*|[0-9]+(?:,[0-9]+)+)\]`)
 
-// Jayway accepts Unicode letters in unquoted JSONPath keys, even though
-// the simple compile-time mapping grammar uses ASCII keys. Keep JSONPath
-// metacharacters on the compatibility path.
+// Jayway accepts Unicode letters in unquoted JSONPath keys. Permit the
+// same literal path segments in native rules and dynamic selectors, while
+// leaving JSONPath metacharacters to the compatibility parser.
 func nativeDynamicPathSegment(value string) bool {
 	if value == "" {
 		return false
@@ -82,7 +82,7 @@ func compileMappingPath(text string) (mappingPath, bool) {
 		token := text[open : open+end+1]
 		p.from = strings.Split(token[1:len(token)-1], ".")
 		for _, k := range p.from {
-			if !simpleKey.MatchString(k) {
+			if !nativeDynamicPathSegment(k) {
 				return p, false
 			}
 		}
@@ -98,7 +98,7 @@ func compileMappingPath(text string) (mappingPath, bool) {
 			k = strings.TrimSuffix(k, "[*]")
 			p.keys[i], p.wildcard = k, i
 		}
-		if !simpleKey.MatchString(k) && !(k == "{}" && p.placeholder != "") {
+		if !nativeDynamicPathSegment(k) && !(k == "{}" && p.placeholder != "") {
 			return p, false
 		}
 	}
