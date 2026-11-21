@@ -57,7 +57,7 @@ configure_worker() {
   local implementation=$1 input=$2 output=$3 group=$4 batch=$5 scenario=$6
   local image probe
   if [[ "$implementation" == "java" ]]; then
-    image="streams/worker-java:ci"
+    image="ghcr.io/manticoresoftware/streams/worker-java-benchmark:$image_tag"
     probe="/metrics" # Original Java HTTPServer has /metrics but no /live.
   else
     image="ghcr.io/manticoresoftware/streams/worker:$image_tag"

@@ -106,8 +106,10 @@ jobs:
             docker image save "$image" | sudo k3s ctr -n k8s.io images import -
             sudo k3s ctr -n k8s.io images list -q | grep -Fx "$image"
           done
-          docker image save streams/worker-java:ci | sudo k3s ctr -n k8s.io images import -
-          sudo k3s ctr -n k8s.io images list -q | grep -Fx 'streams/worker-java:ci'
+          java_image="ghcr.io/manticoresoftware/streams/worker-java-benchmark:$tag"
+          docker tag streams/worker-java:ci "$java_image"
+          docker image save "$java_image" | sudo k3s ctr -n k8s.io images import -
+          sudo k3s ctr -n k8s.io images list -q | grep -Fx "$java_image"
       - name: Install Kafka and Streams chart
         run: bash .github/scripts/k8s/install-streams-chart.sh
       - name: Wait for shared UI, MySQL, columnar and scaler
