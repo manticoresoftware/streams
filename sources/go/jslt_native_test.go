@@ -44,6 +44,52 @@ func TestProtectJSLTIntegers(t *testing.T) {
 	}
 }
 
+// Ordinary JSON numbers should not force BigInt parsing or JS reviver
+// setup. The 53-bit boundary still requires exact preservation.
+func TestJSLTUnsafeIntegerMarkerBoundary(t *testing.T) {
+	safe := `{"id":42,"exact":9007199254740991,"negative":-9007199254740991}`
+	prepared, replacements, err := protectJSLTIntegers(safe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared != safe || replacements != nil {
+		t.Fatalf("safe integers unexpectedly changed: prepared=%q, markers=%v", prepared, replacements)
+	}
+	unsafe := `{"id":9007199254740992,"negative":-9007199254740992}`
+	prepared, replacements, err = protectJSLTIntegers(unsafe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid([]byte(prepared)) || len(replacements) != 2 {
+		t.Fatalf("unsafe integers must remain lossless via two markers, got %v", replacements)
+	}
+}
+
+// The JSLT interpreter must produce exactly the same output through both
+// the fast JSON.parse path and the BigInt-preserving reviver path.
+func TestJSLTReviverFastPath(t *testing.T) {
+	if os.Getenv("STREAMS_JSLT_BUNDLE") == "" {
+		t.Skip("requires pinned jslt-js bundle")
+	}
+	transform, err := newJSLT(`{"id":.id,"title":.title}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ input, expected string }{
+		{`{"id":42,"title":"Unicode café 漢字"}`, `{"id":42,"title":"Unicode café 漢字"}`},
+		{`{"id":9223372036854775807,"title":"Unicode café 漢字"}`,
+			`{"id":9223372036854775807,"title":"Unicode café 漢字"}`},
+	} {
+		got, err := transform(tc.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !sameFixtureJSON(got, tc.expected) {
+			t.Fatalf("JSLT JSON mismatch: got %s, expected %s", got, tc.expected)
+		}
+	}
+}
+
 // Compare numeric JSON values mathematically (1.0 == 1e0), without
 // rounding long integers through float64 as JavaScript JSON.parse would.
 func equivalentJSLTValue(left, right any) bool {

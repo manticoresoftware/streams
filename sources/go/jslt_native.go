@@ -184,7 +184,9 @@ func protectJSLTIntegers(input string) (string, map[string]string, error) {
 		text := input[i:end]
 		// Floating-point numbers continue to use JS Number, like the old
 		// engine. Preserve only integral tokens that would lose precision.
-		if !strings.ContainsAny(text, ".eE+") {
+		if !strings.ContainsAny(text, ".eE+") && len(strings.TrimPrefix(text, "-")) >= 16 {
+			// At most 15 decimal digits are always JS-safe integers.
+			// Avoid big.Int parsing for the overwhelmingly common small IDs.
 			integer, ok := new(big.Int).SetString(text, 10)
 			if ok && (integer.Cmp(maxSafeJSLTInteger) > 0 ||
 				integer.Cmp(new(big.Int).Neg(maxSafeJSLTInteger)) < 0) {
@@ -240,10 +242,14 @@ func newJSLT(config string) (func(string) (string, error), error) {
 		return nil, fmt.Errorf("compile JSLT: %w", err)
 	}
 	fn, err := vm.RunString(`(function(input, integers) {
-		const parsed = JSON.parse(input, function(_key, value) {
-			return typeof value === "string" && Object.prototype.hasOwnProperty.call(integers, value)
-				? BigInt(integers[value]) : value;
-		});
+		// A reviver invokes JavaScript once for every property, even when the
+		// input contains no unsafe integers. Skip it on the common path.
+		const parsed = integers === null
+			? JSON.parse(input)
+			: JSON.parse(input, function(_key, value) {
+				return typeof value === "string" && Object.prototype.hasOwnProperty.call(integers, value)
+					? BigInt(integers[value]) : value;
+			});
 		const result = __streamsCompiledJSLT.applyInput(JSLT.fromJS(parsed));
 		return result == null ? "null" : result.toString();
 	})`)
@@ -265,10 +271,14 @@ func (p *jsltEngine) transform(input string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if replacements == nil {
-		replacements = map[string]string{}
+	// No replacement markers means there are no unsafe integer tokens.
+	// Passing null selects the plain JSON.parse path and avoids allocating
+	// a Goja map and visiting every input property via a JS reviver.
+	var integers goja.Value = goja.Null()
+	if replacements != nil {
+		integers = p.vm.ToValue(replacements)
 	}
-	value, err := p.apply(goja.Undefined(), p.vm.ToValue(prepared), p.vm.ToValue(replacements))
+	value, err := p.apply(goja.Undefined(), p.vm.ToValue(prepared), integers)
 	if err != nil {
 		return "", fmt.Errorf("apply JSLT: %w", err)
 	}
