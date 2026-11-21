@@ -185,6 +185,53 @@ func compileRawWildcardSteps(path string) ([]rawWildcardStep, bool) {
 	return steps, wildcards > 1
 }
 
+// Jayway's [*] selector also iterates values of JSON objects. Read those
+// directly from the source document to retain their ordering and exact text.
+// A duplicated object key is left to the Java bridge because JSON parsers
+// differ in which occurrence they retain.
+func rawWildcardValues(input json.RawMessage) ([]json.RawMessage, bool) {
+	input = bytes.TrimSpace(input)
+	if len(input) == 0 {
+		return nil, false
+	}
+	if input[0] == '[' {
+		var values []json.RawMessage
+		if err := json.Unmarshal(input, &values); err != nil {
+			return nil, false
+		}
+		return values, true
+	}
+	if input[0] != '{' {
+		return nil, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(input))
+	if _, err := decoder.Token(); err != nil {
+		return nil, false
+	}
+	var values []json.RawMessage
+	seen := make(map[string]bool)
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, ok := keyToken.(string)
+		if !ok || seen[key] {
+			return nil, false
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, false
+	}
+	return values, true
+}
+
 func selectRawNestedWildcards(raw string, steps []rawWildcardStep) (string, bool, bool) {
 	nodes := []json.RawMessage{json.RawMessage(raw)}
 	for _, step := range steps {
@@ -195,8 +242,8 @@ func selectRawNestedWildcards(raw string, steps []rawWildcardStep) (string, bool
 				continue
 			}
 			if step.expand {
-				var elements []json.RawMessage
-				if err := json.Unmarshal(value, &elements); err != nil {
+				elements, ok := rawWildcardValues(value)
+				if !ok {
 					continue
 				}
 				next = append(next, elements...)
@@ -232,8 +279,8 @@ func selectRawWildcard(raw string, keys []string, wildcard int) (string, bool, b
 		}
 		current = value
 	}
-	var items []json.RawMessage
-	if err := json.Unmarshal(current, &items); err != nil || items == nil {
+	items, ok := rawWildcardValues(current)
+	if !ok {
 		return "", false, false
 	}
 	var result strings.Builder
