@@ -120,6 +120,29 @@ func TestNativeJavaNumberSerialization(t *testing.T) {
 	}
 }
 
+// Scalar fields cannot be expanded by [*]; they must not require a JRE
+// even when the native worker processes a document with unexpected types.
+func TestNativeScalarWildcardInputs(t *testing.T) {
+	t.Setenv("STREAMS_NATIVE_ONLY", "1")
+	for _, mode := range []string{"1000", "0100", "1010", "0010"} {
+		for _, raw := range []string{
+			`{"items":null}`, `{"items":42}`,
+			`{"items":true}`, `{"items":"hello"}`,
+		} {
+			m := newMapper([]string{"items[*] => selected"}, map[string]string{"selected": "text"}, mode)
+			if err := m.requireNativeSupport(); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := m.transform(raw); err != nil {
+				t.Fatalf("mode %s: %v", mode, err)
+			}
+			if m.reference.cmd != nil {
+				t.Fatalf("mode %s unexpectedly started Java", mode)
+			}
+		}
+	}
+}
+
 func TestURLHashGolden(t *testing.T) {
 	m := newMapper([]string{"link => url"}, map[string]string{"url": "url"}, "1000")
 	raw := `{"link":"Has URL to https://manticoresearch.com/section/?uri=123#anchor"}`
