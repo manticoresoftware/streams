@@ -41,6 +41,11 @@ jobs:
         working-directory: sources/go
         env:
           STREAMS_JSLT_BUNDLE: ${{ github.workspace }}/sources/go/jslt-bundle.js
+      - name: Check Go worker concurrency with the race detector
+        run: go test -race -count=1 ./...
+        working-directory: sources/go
+        env:
+          STREAMS_JSLT_BUNDLE: ${{ github.workspace }}/sources/go/jslt-bundle.js
       # Compare only invented fixtures; production expressions remain private.
       - name: Compare native Go JSLT and mapping with Java
         run: |
@@ -53,7 +58,7 @@ jobs:
           cd sources/go
           STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
             STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
-            go test -count=1 -run '^(TestNativeJSLTParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks)$' -v .
+            go test -count=1 -run '^(TestNativeJSLTParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity)$' -v .
 
   image-build:
     needs: worker-tests
