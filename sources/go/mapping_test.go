@@ -65,6 +65,19 @@ func TestNativeMappingAndOutput(t *testing.T) {
 
 // Decimal selector values must use Java Double.toString, not the raw JSON
 // number token: Jayway resolves 1e1 as the dotted path 10.0.
+func TestNativeObjectWildcardValues(t *testing.T) {
+	m := newMapper([]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000")
+	defer m.reference.close()
+	_, out, err := m.transform(`{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.reference.cmd != nil {
+		t.Fatal("object wildcard unexpectedly started Java")
+	}
+	assertSameJSON(t, out, `{"selected":"One\\nTwo\\n"}`)
+}
+
 func TestNativeExponentDynamicSelectors(t *testing.T) {
 	for _, tc := range []struct{ value, connection string }{
 		{"1e1", `{"10":{"0":{"code":"yes"}}}`},
@@ -442,6 +455,18 @@ func TestReferenceTransforms(t *testing.T) {
 			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
 		{"wildcard objects containing arrays", `{"items":[{"list":[1,2]},{"list":[3,null]}]}`,
 			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
+		{"object wildcard scalar values", `{"items":{"first":"One","second":"Two"}}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected":"text"}, "1000", false},
+		{"object wildcard object values", `{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`,
+			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
+		{"object wildcard original mode", `{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`,
+			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "0100", false},
+		{"object wildcard rename mode", `{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`,
+			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1010", false},
+		{"nested object wildcard at root", `{"groups":{"first":{"people":[{"name":"Ann"}]},"second":{"people":[{"name":"Bob"}]}}}`,
+			[]string{"groups[*].people[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
+		{"nested object wildcard inside array", `{"groups":[{"people":{"first":{"name":"Ann"},"second":{"name":"Bob"}}}]}`,
+			[]string{"groups[*].people[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
 		{"wildcard empty array", `{"items":[]}`,
 			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
 		{"missing wildcard", `{"other":"value"}`,
