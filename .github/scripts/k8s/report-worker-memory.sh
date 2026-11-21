@@ -22,7 +22,7 @@ awk -v stage="$stage" -v rss="$rss_kb" -v hwm="$hwm_kb" 'BEGIN {
 # to distinguish retained heap memory from garbage collector timing.
 worker_api="/api/v1/namespaces/$APP_NAMESPACE/pods/$pod:8081/proxy/metrics"
 if metrics=$(kubectl get --raw "$worker_api" 2>/dev/null); then
-  heap_bytes=$(awk '$1 ~ /^worker_consumption_ram\\{/ {print $2; exit}' <<<"$metrics")
+  heap_bytes=$(awk '$1 ~ /^worker_consumption_ram/ {print $2; exit}' <<<"$metrics")
   if [[ "$heap_bytes" =~ ^[0-9]+([.][0-9]+)?$ ]] && [[ "$heap_bytes" != "0" ]]; then
     awk -v stage="$stage" -v heap="$heap_bytes" 'BEGIN {
       printf "Go worker live heap objects (%s): %.2f MiB (last metrics sample)\n", stage, heap / 1048576
