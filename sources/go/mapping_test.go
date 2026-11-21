@@ -63,8 +63,7 @@ func TestNativeMappingAndOutput(t *testing.T) {
 	}
 }
 
-// Decimal selector values must use Java Double.toString, not the raw JSON
-// number token: Jayway resolves 1e1 as the dotted path 10.0.
+// Object-valued wildcards must produce a result without starting Java.
 func TestNativeObjectWildcardValues(t *testing.T) {
 	m := newMapper([]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000")
 	defer m.reference.close()
@@ -78,6 +77,8 @@ func TestNativeObjectWildcardValues(t *testing.T) {
 	assertSameJSON(t, out, `{"selected":"One\\nTwo\\n"}`)
 }
 
+// Decimal selector values must use Java Double.toString, not the raw JSON
+// number token: Jayway resolves 1e1 as the dotted path 10.0.
 func TestNativeExponentDynamicSelectors(t *testing.T) {
 	for _, tc := range []struct{ value, connection string }{
 		{"1e1", `{"10":{"0":{"code":"yes"}}}`},
