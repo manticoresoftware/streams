@@ -495,9 +495,10 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if err := decoder.Decode(&doc); err != nil || doc == nil || strings.TrimSpace(raw[decoder.InputOffset():]) != "" {
 		return m.referenceMap(raw)
 	}
-	// JsonIterator keeps the original JSON number tokens in no-transform
-	// output and whole_document mappings. Only the rename mode round-trips
-	// the source through Jayway before serializing it again.
+	// Mapped documents use Java's normalized numeric representation, even
+	// for whole_document. The no-transform output, however, preserves the
+	// original JSON tokens (for example 2.5e1 instead of 25.0).
+	normalizeJavaJSONNumbers(doc)
 	originalOutput := raw
 	mapped := map[string]any{}
 	out := map[string]any{}
@@ -505,7 +506,6 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	original := m.output[1] == '1'
 	if rename {
 		out = sourceCopy(doc)
-		normalizeJavaJSONNumbers(out)
 	}
 	for _, rule := range m.rules {
 		if _, exists := mapped[rule.target]; exists {
