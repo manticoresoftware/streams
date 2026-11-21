@@ -495,21 +495,17 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if err := decoder.Decode(&doc); err != nil || doc == nil || strings.TrimSpace(raw[decoder.InputOffset():]) != "" {
 		return m.referenceMap(raw)
 	}
-	normalizeJavaJSONNumbers(doc)
+	// JsonIterator keeps the original JSON number tokens in no-transform
+	// output and whole_document mappings. Only the rename mode round-trips
+	// the source through Jayway before serializing it again.
 	originalOutput := raw
-	if m.output[2] == '1' {
-		encoded, err := json.Marshal(doc)
-		if err != nil {
-			return m.referenceMap(raw)
-		}
-		originalOutput = string(encoded)
-	}
 	mapped := map[string]any{}
 	out := map[string]any{}
 	rename := m.output[0] == '1' && m.output[2] == '1'
 	original := m.output[1] == '1'
 	if rename {
 		out = sourceCopy(doc)
+		normalizeJavaJSONNumbers(out)
 	}
 	for _, rule := range m.rules {
 		if _, exists := mapped[rule.target]; exists {
