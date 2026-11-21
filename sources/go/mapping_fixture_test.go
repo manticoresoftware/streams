@@ -52,17 +52,7 @@ func TestFixtureMappingFallbacks(t *testing.T) {
 		t.Fatal("test_data.json is missing from the Kafka fixture")
 	}
 
-	m := newMapper([]string{
-		"whole_document => json",
-		"text.status.retweeted_status.user.url&&text.comment.status.user.url&&text.comment.status.retweeted_status.user.url&&text.comment.reply_comment.user.url&&text.comment.reply_comment.text&&text.comment.status.statusurl&&text.status.statusurl&&text.comment.user.url&&text.comment.reply_comment.status.user.url&&text.comment.source => url",
-		"text.comment.status.source => source",
-		"text.comment.status.text => text",
-		"text.comment.text => title",
-		"text.status.text => statustext",
-	}, map[string]string{
-		"json": "json", "url": "url", "source": "text",
-		"text": "text", "title": "text", "statustext": "text",
-	}, "0011")
+	m := newFixtureMapper()
 	defer m.reference.close()
 
 	scanner := bufio.NewScanner(records)
@@ -136,4 +126,20 @@ func sameFixtureJSON(a, b string) bool {
 	left, leftErr := parse(a)
 	right, rightErr := parse(b)
 	return leftErr == nil && rightErr == nil && reflect.DeepEqual(left, right)
+}
+
+// Keep the mapping configuration identical for the fixture parity test and
+// isolated throughput benchmarks. Both represent the repository's E2E rules.
+func newFixtureMapper() *mapper {
+	return newMapper([]string{
+		"whole_document => json",
+		"text.status.retweeted_status.user.url&&text.comment.status.user.url&&text.comment.status.retweeted_status.user.url&&text.comment.reply_comment.user.url&&text.comment.reply_comment.text&&text.comment.status.statusurl&&text.status.statusurl&&text.comment.user.url&&text.comment.reply_comment.status.user.url&&text.comment.source => url",
+		"text.comment.status.source => source",
+		"text.comment.status.text => text",
+		"text.comment.text => title",
+		"text.status.text => statustext",
+	}, map[string]string{
+		"json": "json", "url": "url", "source": "text",
+		"text": "text", "title": "text", "statustext": "text",
+	}, "0011")
 }
