@@ -261,6 +261,12 @@ func TestReferenceTransforms(t *testing.T) {
 		mode   string
 		needsJava bool
 	}{
+		{"whole document exponent 1000", `{"number":2.5e1,"values":[1e-3,1.0,9007199254740993]}`,
+			[]string{"whole_document => json"}, map[string]string{"json":"json"}, "1000", false},
+		{"whole document exponent 0010", `{"number":2.5e1,"values":[1e-3,1.0,9007199254740993]}`,
+			[]string{"whole_document => json"}, map[string]string{"json":"json"}, "0010", false},
+		{"whole document exponent 1010", `{"number":2.5e1,"values":[1e-3,1.0,9007199254740993]}`,
+			[]string{"whole_document => json"}, map[string]string{"json":"json"}, "1010", false},
 		{"non-string URL abort 1000", `{"before":"first","link":123,"after":"last"}`,
 			[]string{"before => before", "link => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1000", false},
 		{"undeclared field abort 1000", `{"before":"first","value":"ignored","after":"last"}`,
