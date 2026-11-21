@@ -285,9 +285,16 @@ func selectRawWildcard(raw string, keys []string, wildcard int) (string, bool, b
 		}
 		current = value
 	}
-	items, ok, _ := rawWildcardValues(current)
-	if !ok {
+	items, ok, incompatible := rawWildcardValues(current)
+	if incompatible {
+		// Duplicate keys have parser-dependent ordering; leave the oracle
+		// fallback available for this ambiguous case.
 		return "", false, false
+	}
+	if !ok {
+		// Jayway does not expand a primitive or null as a collection.
+		// There is no selected value, but no Java process is needed.
+		return "", false, true
 	}
 	var result strings.Builder
 	for _, item := range items {
