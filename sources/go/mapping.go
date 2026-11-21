@@ -502,8 +502,15 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				if !ok {
 					// Java substitutes the string form of scalar selector values.
 					switch v := v.(type) {
-					case json.Number, bool:
-						key = fmt.Sprint(v)
+					case json.Number:
+						// Jayway parses decimal and exponent tokens as Java doubles.
+						// Their toString form can differ from the JSON token (1e1 -> 10.0).
+						key, ok = javaNumberText(v.String())
+						if !ok {
+							return m.referenceMap(raw)
+						}
+					case bool:
+						key = strconv.FormatBool(v)
 					case nil:
 						// In Java, null.toString() aborts the mapping loop.
 						return m.abortMapping(raw, mapped, out)
