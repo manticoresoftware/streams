@@ -632,7 +632,7 @@ func (m *mapper) abortMapping(raw string, mapped, output map[string]any) (any, s
 func (m *mapper) transform(raw string) (any, string, error) {
 	if m.needsReference {
 		issue := m.fallbackAudit.firstCompileIssue()
-		return m.fallbackMap(raw, mappingFallbackUnsupportedRule, issue.ruleIndex, issue.pathIndex)
+		return m.fallbackMap(raw, mappingFallbackUnsupportedRule, issue.RuleIndex, issue.PathIndex)
 	}
 	if m.passThroughWithoutRule {
 		return json.RawMessage(raw), "null", nil
