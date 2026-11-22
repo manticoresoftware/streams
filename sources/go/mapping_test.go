@@ -245,7 +245,7 @@ func TestStrictNativeMapper(t *testing.T) {
 	if err := ordinary.requireNativeSupport(); err != nil {
 		t.Fatal(err)
 	}
-	_, output, err := ordinary.transform(`{"title":"ok"}`)
+	_, output, err = ordinary.transform(`{"title":"ok"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
