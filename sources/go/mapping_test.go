@@ -78,23 +78,21 @@ func TestNativeObjectWildcardValues(t *testing.T) {
 	assertSameJSON(t, out, `{"selected":"One\nTwo\n"}`)
 }
 
-// Duplicate keys inside selected object values must never produce a
-// different map string when no Java runtime is available.
+// Object wildcards must deduplicate keys natively, including nested values.
 func TestStrictNativeNestedDuplicateKeys(t *testing.T) {
 	t.Setenv("STREAMS_NATIVE_ONLY", "1")
-	for _,tc := range []struct{ path, doc string }{
+	for _, tc := range []struct{ path, doc string }{
 		{"items[*]", `{"items":[{"name":"Old","name":"New"}]}`},
 		{"items[*]", `{"items":[{"outer":{"name":"Old","name":"New"}}]}`},
+		{"items[*]", `{"items":[[{"name":"Old","name":"New"}]]}`},
 		{"groups[*].people[*]", `{"groups":[{"people":[{"name":"Old","name":"New"}]}]}`},
+		{"items[*].name", `{"items":{"first":{"name":"Old"},"first":{"name":"New"}}}`},
 	} {
 		m := newMapper([]string{tc.path+" => selected"}, map[string]string{"selected":"text"}, "1000")
-		_,_,err := m.transform(tc.doc)
-		if err == nil || !strings.Contains(err.Error(), "hybrid worker") {
-			t.Fatalf("%s: expected compatibility error, got %v", tc.path, err)
-		}
-		if m.reference.cmd != nil {
-			t.Fatal("native-only mapping started a Java process")
-		}
+		_, output, err := m.transform(tc.doc)
+		if err != nil { t.Fatalf("%s: %v", tc.path, err) }
+		if !json.Valid([]byte(output)) { t.Fatalf("%s: invalid output %s", tc.path, output) }
+		if m.reference.cmd != nil { t.Fatal("native-only mapping started Java") }
 	}
 }
 
@@ -550,18 +548,26 @@ func TestReferenceTransforms(t *testing.T) {
 			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
 		{"object wildcard reversed fields", `{"items":{"second":{"name":"Two"},"first":{"name":"One"}}}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
-		{"array wildcard object with duplicate keys uses Java", `{"items":[{"name":"Old","name":"New"}]}`,
-			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
-		{"array wildcard object with nested duplicate keys uses Java", `{"items":[{"outer":{"name":"Old","name":"New"}}]}`,
-			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
-		{"array wildcard array containing duplicate keys uses Java", `{"items":[[{"name":"Old","name":"New"}]]}`,
-			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
-		{"nested wildcard object with duplicate keys uses Java", `{"groups":[{"people":[{"name":"Old","name":"New"}]}]}`,
-			[]string{"groups[*].people[*] => selected"}, map[string]string{"selected": "text"}, "1000", true},
+		{"array wildcard object with duplicate keys stays native", `{"items":[{"name":"Old","name":"New"}]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
+		{"array wildcard object with nested duplicate keys stays native", `{"items":[{"outer":{"name":"Old","name":"New"}}]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
+		{"array wildcard array containing duplicate keys stays native", `{"items":[[{"name":"Old","name":"New"}]]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
+		{"nested wildcard object with duplicate keys stays native", `{"groups":[{"people":[{"name":"Old","name":"New"}]}]}`,
+			[]string{"groups[*].people[*] => selected"}, map[string]string{"selected": "text"}, "1000", false},
+		{"wildcard duplicate retains first position with last value", `{"items":[{"id":"Old","name":"A","id":"New"}]}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected":"text"}, "1000", false},
+		{"object wildcard duplicate retains position", `{"items":{"first":"Old","second":"B","first":"New"}}`,
+			[]string{"items[*] => selected"}, map[string]string{"selected":"text"}, "1000", false},
+		{"Unicode descendant skip", `{"entry":{"название":"A"},"after":"last"}`,
+			[]string{"entry..название => chosen", "after => after"}, map[string]string{"chosen":"text","after":"text"}, "1000", false},
+		{"Unicode URL collection abort", `{"before":"first","ссылки":["https://example.com"],"after":"last"}`,
+			[]string{"before => before", "ссылки[*] => url", "after => after"}, map[string]string{"before":"text","url":"url","after":"text"}, "1000", false},
 		{"duplicate object field with selected leaf stays native", `{"items":[{"name":"Old","name":"New"}]}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected": "text"}, "1000", false},
-		{"object wildcard duplicate key uses Java", `{"items":{"first":{"name":"Old"},"first":{"name":"New"}}}`,
-			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", true},
+		{"object wildcard duplicate key stays native", `{"items":{"first":{"name":"Old"},"first":{"name":"New"}}}`,
+			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000", false},
 		{"object wildcard original mode", `{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`,
 			[]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "0100", false},
 		{"object wildcard rename mode", `{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`,

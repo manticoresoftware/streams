@@ -59,52 +59,52 @@ func quoteMappedString(value string) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func rawMappedObject(input json.RawMessage, javaMap bool) (string, bool) {
+// Preserve the first appearance of each key and the last duplicate value,
+// matching Java's JSON-smart object representation used by Jayway.
+type orderedRawField struct {
+	name string
+	value json.RawMessage
+}
+func orderedRawObject(input json.RawMessage) ([]orderedRawField, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(input))
-	if _, err := decoder.Token(); err != nil {
-		return "", false
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, false
 	}
-	var parts []string
-	seen := make(map[string]struct{})
+	fields := make([]orderedRawField, 0)
+	positions := make(map[string]int)
 	for decoder.More() {
 		name, err := decoder.Token()
-		if err != nil {
-			return "", false
-		}
+		if err != nil { return nil, false }
 		key, ok := name.(string)
-		if !ok {
-			return "", false
-		}
-		// JSON-smart collapses duplicate object keys before converting them
-		// to Java map text. The raw Go traversal would print both, so retain
-		// the compatibility fallback instead of silently changing the value.
-		if _, duplicated := seen[key]; duplicated {
-			return "", false
-		}
-		seen[key] = struct{}{}
+		if !ok { return nil, false }
 		var child json.RawMessage
-		if err := decoder.Decode(&child); err != nil {
-			return "", false
+		if err := decoder.Decode(&child); err != nil { return nil, false }
+		if at, seen := positions[key]; seen {
+			fields[at].value = child
+		} else {
+			positions[key] = len(fields)
+			fields = append(fields, orderedRawField{name: key, value: child})
 		}
+	}
+	if token, err := decoder.Token(); err != nil || token != json.Delim('}') { return nil, false }
+	return fields, true
+}
+func rawMappedObject(input json.RawMessage, javaMap bool) (string, bool) {
+	fields, ok := orderedRawObject(input)
+	if !ok { return "", false }
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
 		var value string
+		if javaMap { value, ok = rawMappedText(field.value) } else { value, ok = rawMappedJSON(field.value) }
+		if !ok { return "", false }
 		if javaMap {
-			value, ok = rawMappedText(child)
+			parts = append(parts, field.name+"="+value)
 		} else {
-			value, ok = rawMappedJSON(child)
-		}
-		if !ok {
-			return "", false
-		}
-		if javaMap {
-			parts = append(parts, key+"="+value)
-		} else {
-			parts = append(parts, quoteMappedString(key)+":"+value)
+			parts = append(parts, quoteMappedString(field.name)+":"+value)
 		}
 	}
 	separator := ","
-	if javaMap {
-		separator = ", "
-	}
+	if javaMap { separator = ", " }
 	return "{" + strings.Join(parts, separator) + "}", true
 }
 
@@ -199,47 +199,17 @@ func compileRawWildcardSteps(path string) ([]rawWildcardStep, bool) {
 // differ in which occurrence they retain. The final boolean signals that case.
 func rawWildcardValues(input json.RawMessage) ([]json.RawMessage, bool, bool) {
 	input = bytes.TrimSpace(input)
-	if len(input) == 0 {
-		return nil, false, false
-	}
+	if len(input) == 0 { return nil, false, false }
 	if input[0] == '[' {
 		var values []json.RawMessage
-		if err := json.Unmarshal(input, &values); err != nil {
-			return nil, false, false
-		}
+		if err := json.Unmarshal(input, &values); err != nil { return nil, false, false }
 		return values, true, false
 	}
-	if input[0] != '{' {
-		return nil, false, false
-	}
-	decoder := json.NewDecoder(bytes.NewReader(input))
-	if _, err := decoder.Token(); err != nil {
-		return nil, false, false
-	}
-	var values []json.RawMessage
-	seen := make(map[string]bool)
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		if err != nil {
-			return nil, false, false
-		}
-		key, ok := keyToken.(string)
-		if !ok {
-			return nil, false, false
-		}
-		if seen[key] {
-			return nil, false, true
-		}
-		seen[key] = true
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return nil, false, false
-		}
-		values = append(values, value)
-	}
-	if _, err := decoder.Token(); err != nil {
-		return nil, false, false
-	}
+	if input[0] != '{' { return nil, false, false }
+	fields, ok := orderedRawObject(input)
+	if !ok { return nil, false, false }
+	values := make([]json.RawMessage, 0, len(fields))
+	for _, field := range fields { values = append(values, field.value) }
 	return values, true, false
 }
 

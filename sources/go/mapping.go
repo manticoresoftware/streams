@@ -117,7 +117,7 @@ func compileSkippedDescendantPath(input string) (mappingPath, bool) {
 	if strings.HasPrefix(input, ".") && !strings.HasPrefix(input, "..") {
 		p.keys = strings.Split(input, ".")
 		for _, key := range p.keys[1:] {
-			if !simpleKey.MatchString(key) {
+			if !nativeDynamicPathSegment(key) {
 				return p, false
 			}
 		}
@@ -132,7 +132,7 @@ func compileSkippedDescendantPath(input string) (mappingPath, bool) {
 		if key == "" && i > 0 && i < len(p.keys)-1 {
 			continue
 		}
-		if !simpleKey.MatchString(key) {
+		if !nativeDynamicPathSegment(key) {
 			return p, false
 		}
 	}
@@ -176,7 +176,7 @@ func compileURLCollectionPath(input string) (mappingPath, bool) {
 	}
 	keys := strings.Split(prefix, ".")
 	for _, key := range keys {
-		if !simpleKey.MatchString(key) {
+		if !nativeDynamicPathSegment(key) {
 			return p, false
 		}
 	}
