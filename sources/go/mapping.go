@@ -550,7 +550,7 @@ func selectMappedValue(root map[string]any, keys []string, wildcard int) (text s
 // selectAdvancedMappedValue reproduces the worker's Jayway-to-string mapping.
 // A wildcard returns a newline-delimited list, while a definite path must
 // return a string (or null). Unsupported result types use the Java oracle.
-func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, bool, bool) {
+func selectAdvancedMappedValue(root map[string]any, path mappingPath, raw string) (string, bool, bool) {
 	if path.indefiniteAsScalar {
 		// Without [*] the legacy mapper catches ClassCastException from
 		// Jayway's JSONArray result. It does not add a mapped value.
@@ -569,7 +569,7 @@ func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, b
 		}
 		var b strings.Builder
 		for _, item := range items {
-			text, ok := javaWildcardText(item)
+			text, ok := javaWildcardRawText(item, raw)
 			if !ok {
 				return "", false, false
 			}
@@ -581,7 +581,7 @@ func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, b
 	if path.multi {
 		var b strings.Builder
 		for _, v := range values {
-			text, ok := javaWildcardText(v)
+			text, ok := javaWildcardRawText(v, raw)
 			if !ok {
 				return "", false, false
 			}
@@ -835,7 +835,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			} else if len(path.rawWildcardSteps) > 0 {
 				text, found, compatible = selectRawNestedWildcards(raw, path.rawWildcardSteps)
 			} else if path.advanced != nil {
-				text, found, compatible = selectAdvancedMappedValue(doc, path)
+				text, found, compatible = selectAdvancedMappedValue(doc, path, raw)
 			} else {
 				text, found, compatible = selectMappedValue(doc, keys, path.wildcard)
 			}

@@ -167,6 +167,77 @@ func rawMappedText(input json.RawMessage) (string, bool) {
 	}
 }
 
+
+// Java formats object-valued wildcard matches using their original key order.
+// Search the raw source for an equivalent subtree, but reject ambiguous
+// matches with different Java string representations rather than guessing.
+func javaWildcardRawText(value any, raw string) (string, bool) {
+	if text, ok := javaWildcardText(value); ok {
+		return text, true
+	}
+	switch value.(type) {
+	case map[string]any, []any:
+	default:
+		return "", false
+	}
+	normalized, err := json.Marshal(value)
+	if err != nil {
+		return "", false
+	}
+	var chosen string
+	found, ambiguous := false, false
+	var walk func(json.RawMessage)
+	walk = func(node json.RawMessage) {
+		if ambiguous {
+			return
+		}
+		node = bytes.TrimSpace(node)
+		if len(node) == 0 {
+			return
+		}
+		decoder := json.NewDecoder(bytes.NewReader(node))
+		decoder.UseNumber()
+		var parsed any
+		if decoder.Decode(&parsed) == nil {
+			normalizeJavaJSONNumbers(parsed)
+			if candidate, err := json.Marshal(parsed); err == nil && bytes.Equal(candidate, normalized) {
+				text, ok := rawMappedText(node)
+				if !ok {
+					ambiguous = true
+					return
+				}
+				if found && text != chosen {
+					ambiguous = true
+					return
+				}
+				found, chosen = true, text
+			}
+		}
+		switch node[0] {
+		case '{':
+			fields, ok := orderedRawObject(node)
+			if !ok {
+				ambiguous = true
+				return
+			}
+			for _, field := range fields {
+				walk(field.value)
+			}
+		case '[':
+			var items []json.RawMessage
+			if json.Unmarshal(node, &items) != nil {
+				ambiguous = true
+				return
+			}
+			for _, item := range items {
+				walk(item)
+			}
+		}
+	}
+	walk(json.RawMessage(raw))
+	return chosen, found && !ambiguous
+}
+
 // The multi-wildcard subset needs only dotted field lookups and [*] expansion.
 // Walk RawMessages instead of maps to preserve Java's field order when a
 // selected value is a nested object.
