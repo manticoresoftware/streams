@@ -31,6 +31,7 @@ type mappingPath struct {
 	indefiniteAsScalar bool
 	rawWildcardSteps []rawWildcardStep
 	abortOnRead bool
+	quotedWildcardValue bool
 	lengthFunction bool
 	urlCollectionPrefix []string
 	urlCollectionArrayOnly bool
@@ -68,6 +69,42 @@ func nativeDynamicPathSegment(value string) bool {
 		return false
 	}
 	return true
+}
+
+// Recognize invalid operators outside brackets and quoted JSON field names.
+// A key named "user...name" must not be treated as an invalid path.
+func legacyInvalidJSONPath(path string) bool {
+	var quote byte
+	escaped, depth := false, 0
+	for i := 0; i < len(path); i++ {
+		c := path[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if strings.HasPrefix(path[i:], "[(@") {
+			return true
+		}
+		if c == '[' {
+			depth++
+		} else if c == ']' && depth > 0 {
+			depth--
+		}
+		if depth == 0 && strings.HasPrefix(path[i:], "...") {
+			return true
+		}
+	}
+	return false
 }
 
 // Compile the common mapping grammar once. Custom JSONPath expressions use the
@@ -210,7 +247,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 
 			p, ok := compileMappingPath(input)
-			if !ok && (strings.Contains(input, "...") || strings.Contains(input, "[(@")) {
+			if !ok && legacyInvalidJSONPath(input) {
 				// Java throws at runtime, retaining fields mapped before this path.
 				p.abortOnRead, ok = true, true
 			}
@@ -238,6 +275,11 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 					// The old worker only joins collections for literal [*].
 					// Other indefinite paths cannot be cast from JSONArray to String.
 					p.indefiniteAsScalar = !p.multi && !expression.Normal()
+					if expression.Normal() && p.multi {
+						// A quoted key can contain [*] without using a wildcard.
+						// Java still casts the selected value to JSONArray.
+						p.quotedWildcardValue, p.multi = true, false
+					}
 				}
 			}
 			if !ok && !strings.Contains(input, "[*]") &&
@@ -515,6 +557,27 @@ func selectAdvancedMappedValue(root map[string]any, path mappingPath) (string, b
 		return "", false, true
 	}
 	values := path.advanced.Get(root)
+	if path.quotedWildcardValue {
+		if len(values) != 1 {
+			return "", false, true
+		}
+		items, isArray := values[0].([]any)
+		if !isArray {
+			// The quoted key contains "[*]" but selects a scalar.
+			// Java's JSONArray cast fails and the field is skipped.
+			return "", false, true
+		}
+		var b strings.Builder
+		for _, item := range items {
+			text, ok := javaWildcardText(item)
+			if !ok {
+				return "", false, false
+			}
+			b.WriteString(text)
+			b.WriteByte('\n')
+		}
+		return b.String(), true, true
+	}
 	if path.multi {
 		var b strings.Builder
 		for _, v := range values {
@@ -670,6 +733,16 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				return m.abortMapping(originalOutput, mapped, out)
 			}
 			if rule.isURL {
+				if path.lengthFunction {
+					values := path.advanced.Get(doc)
+					if len(values) == 1 && values[0] != nil {
+						if _, isString := values[0].(string); !isString {
+							return m.abortMapping(originalOutput, mapped, out)
+						}
+					}
+					// Jayway returns null for string length().
+					continue
+				}
 				if len(path.urlCollectionPrefix) > 0 {
 					root, present := lookupMappedPath(doc, path.urlCollectionPrefix)
 					if present {
@@ -684,11 +757,27 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				var v any
 				var exists bool
 				if path.advanced != nil {
-					// URL mapping requires a definite JSONPath that resolves
-					// to one string. Indefinite paths keep Java semantics.
 					values := path.advanced.Get(doc)
+					// Java URL mapping cannot cast an indefinite
+					// JSONArray to String. An existing definite prefix
+					// makes the result a collection even when empty.
+					if !path.advanced.Normal() {
+						for i, frag := range path.advanced {
+							_, wildcard := frag.(jp.Wildcard)
+							_, filter := frag.(*jp.Filter)
+							_, union := frag.(jp.Union)
+							_, slice := frag.(jp.Slice)
+							_, descent := frag.(jp.Descent)
+							if wildcard || filter || union || slice || descent {
+								if len(path.advanced[:i].Get(doc)) > 0 {
+									return m.abortMapping(originalOutput, mapped, out)
+								}
+								break
+							}
+						}
+					}
 					if len(values) > 1 {
-						return m.referenceMap(originalInput)
+						return m.abortMapping(originalOutput, mapped, out)
 					}
 					if len(values) == 1 {
 						v, exists = values[0], true
