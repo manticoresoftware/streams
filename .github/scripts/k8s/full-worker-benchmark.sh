@@ -165,6 +165,7 @@ monitor_output() {
   local input=$1 group=$2 input_docs=$3 output=$4 result_file=$5 expected_output=$6
   local deadline=$((SECONDS + TIMEOUT_SECONDS))
   local n first=0 current_ms restarts committed
+  local settled_count=-1 settled_since=0
   while (( SECONDS < deadline )); do
     n=$(topic_offset "$output" || echo 0)
     current_ms=$(date +%s%3N)
@@ -183,21 +184,34 @@ monitor_output() {
         return 1
       fi
       if (( n == expected_output )); then
-        printf '%s %s %s\n' "$first" "$current_ms" "$n" > "$result_file"
-        return 0
+        # Requiring the input group to commit the final offset ensures that
+        # the worker actually completed the backlog rather than just sent
+        # the expected number of output records early.
+        committed=$(group_offset "$group" "$input" || true)
+        if [[ "$committed" == "$input_docs" ]]; then
+          printf '%s %s %s\n' "$first" "$current_ms" "$n" > "$result_file"
+          return 0
+        fi
       fi
     else
-      # For the 1000-document small-batch fixture the exact output count is
-      # learned from Java, then compared with Go. A committed input offset
-      # means the worker has already delivered its corresponding output.
+      # The first Java run determines the count for this small fixture.
+      # Looking at the output offset BEFORE the group offset is unsafe:
+      # fast Go can finish publishing many more messages while the group
+      # inspection is running. Re-query the output high watermark after
+      # seeing the final committed input offset and require a plateau.
       committed=$(group_offset "$group" "$input" || true)
       if [[ "$committed" == "$input_docs" ]]; then
-        if (( n == 0 )); then
-          echo "No output records for $output; choose a representative fixture" >&2
-          return 1
+        n=$(topic_offset "$output")
+        current_ms=$(date +%s%3N)
+        if (( n > 0 && first == 0 )); then first=$current_ms; fi
+        if (( n > 0 && n == settled_count && current_ms - settled_since >= 3000 )); then
+          printf '%s %s %s\n' "$first" "$settled_since" "$n" > "$result_file"
+          return 0
         fi
-        printf '%s %s %s\n' "$first" "$current_ms" "$n" > "$result_file"
-        return 0
+        if (( n != settled_count )); then
+          settled_count=$n
+          settled_since=$current_ms
+        fi
       fi
     fi
     sleep 1
@@ -231,6 +245,21 @@ run_worker() {
   if [[ "$batch" == "2" ]]; then
     input_docs="$BENCH_SMALL_INPUT_DOCS"
     expected_output=0
+    if [[ "$implementation" == "go" ]]; then
+      # The Java counterpart already ran for odd repetitions. For even
+      # repetitions Go runs first, so use the previous Java repetition
+      # of the same scenario as its completion target. The final JSON
+      # multiset is still compared to Java from the *same* repetition.
+      local reference="$artifact_dir/${base_run_id}-$scenario-$batch-$rep-java.times"
+      if [[ ! -s "$reference" ]]; then
+        reference="$artifact_dir/${base_run_id}-$scenario-$batch-1-java.times"
+      fi
+      [[ -s "$reference" ]] || { echo "Missing Java reference count for $tag" >&2; return 1; }
+      expected_output=$(awk '{print $3}' "$reference")
+      [[ "$expected_output" =~ ^[1-9][0-9]*$ ]] || {
+        echo "Invalid Java reference output count: $expected_output" >&2; return 1;
+      }
+    fi
   fi
   scale_down
   prepare_backlog "$input" "$output" "$group" "$input_docs"
