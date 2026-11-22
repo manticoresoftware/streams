@@ -213,7 +213,7 @@ func normalizeSingleQuotedJSON(raw string) (string, bool) {
 // these forms differently in passthrough mode.
 func stripLegacyTrailingCommas(raw string) (string, bool, bool) {
 	var result strings.Builder
-	inString, escaped, arrayChanged, objectChanged := false, false, false
+	inString, escaped, arrayChanged, objectChanged := false, false, false, false
 	for i := 0; i < len(raw); i++ {
 		c := raw[i]
 		if inString {
