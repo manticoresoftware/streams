@@ -320,6 +320,122 @@ func selectRawNestedWildcards(raw string, steps []rawWildcardStep) (string, bool
 	return result.String(), true, true
 }
 
+
+// compileRawDescendantWildcard handles the Jayway "array[*]..field" grammar.
+// The generic Go JSONPath evaluator does not visit every nested match here,
+// so evaluate these paths from source JSON to preserve all results and order.
+func compileRawDescendantWildcard(path string) ([]rawWildcardStep, []string, bool) {
+	prefix, suffix, ok := strings.Cut(path, "..")
+	if !ok || strings.Contains(suffix, "..") || !strings.HasSuffix(prefix, "[*]") || suffix == "" {
+		return nil, nil, false
+	}
+	parts := strings.Split(prefix, ".")
+	steps := make([]rawWildcardStep, 0, len(parts))
+	for _, part := range parts {
+		expand := strings.HasSuffix(part, "[*]")
+		if expand {
+			part = strings.TrimSuffix(part, "[*]")
+		}
+		if !nativeDynamicPathSegment(part) {
+			return nil, nil, false
+		}
+		steps = append(steps, rawWildcardStep{key:part, expand:expand})
+	}
+	keys := strings.Split(suffix, ".")
+	for _, key := range keys {
+		if !nativeDynamicPathSegment(key) {
+			return nil, nil, false
+		}
+	}
+	return steps, keys, true
+}
+
+// selectRawDescendantWildcard applies Jayway's recursive search in document
+// order. Unlike a Go map, orderedRawObject preserves the order of source keys.
+func selectRawDescendantWildcard(raw string, steps []rawWildcardStep, keys []string) (string, bool, bool) {
+	nodes := []json.RawMessage{json.RawMessage(raw)}
+	for _, step := range steps {
+		var next []json.RawMessage
+		for _, node := range nodes {
+			value, exists := rawMappedField(node, step.key)
+			if !exists {
+				continue
+			}
+			if step.expand {
+				items, ok, incompatible := rawWildcardValues(value)
+				if incompatible {
+					return "", false, false
+				}
+				if ok {
+					next = append(next, items...)
+				}
+			} else {
+				next = append(next, value)
+			}
+		}
+		nodes = next
+	}
+	var output strings.Builder
+	var visit func(json.RawMessage, int) bool
+	visit = func(node json.RawMessage, depth int) bool {
+		if depth > 256 {
+			// Avoid unbounded recursion for unexpected input depth.
+			return false
+		}
+		node = bytes.TrimSpace(node)
+		if len(node) == 0 {
+			return false
+		}
+		switch node[0] {
+		case '{':
+			fields, ok := orderedRawObject(node)
+			if !ok {
+				return false
+			}
+			for _, field := range fields {
+				if field.name == keys[0] {
+					selected := field.value
+					found := true
+					for _, key := range keys[1:] {
+						selected, found = rawMappedField(selected, key)
+						if !found {
+							break
+						}
+					}
+					if found {
+						text, ok := rawMappedText(selected)
+						if !ok {
+							return false
+						}
+						output.WriteString(text)
+						output.WriteByte('\n')
+					}
+				}
+				if !visit(field.value, depth+1) {
+					return false
+				}
+			}
+		case '[':
+			var items []json.RawMessage
+			if json.Unmarshal(node, &items) != nil {
+				return false
+			}
+			for _, item := range items {
+				if !visit(item, depth+1) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	for _, node := range nodes {
+		if !visit(node, 0) {
+			return "", false, false
+		}
+	}
+	return output.String(), true, true
+}
+
 // Recover the exact ordered map/list string produced by Jayway for a simple
 // wildcard path. Unsupported types retain the Java compatibility fallback.
 func selectRawWildcard(raw string, keys []string, wildcard int) (string, bool, bool) {

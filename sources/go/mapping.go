@@ -30,6 +30,8 @@ type mappingPath struct {
 	multi bool
 	indefiniteAsScalar bool
 	rawWildcardSteps []rawWildcardStep
+	rawDescendantSteps []rawWildcardStep
+	rawDescendantKeys []string
 	abortOnRead bool
 	quotedWildcardValue bool
 	lengthFunction bool
@@ -295,6 +297,9 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 			if !r.isURL && p.advanced != nil && p.multi {
 				if steps, supported := compileRawWildcardSteps(input); supported {
 					p.rawWildcardSteps = steps
+				}
+				if steps, suffix, supported := compileRawDescendantWildcard(input); supported {
+					p.rawDescendantSteps, p.rawDescendantKeys = steps, suffix
 				}
 			}
 			if fields[target] == "url" {
@@ -832,6 +837,8 @@ func (m *mapper) transform(raw string) (any, string, error) {
 						text, found = "null", true
 					}
 				}
+			} else if len(path.rawDescendantSteps) > 0 {
+				text, found, compatible = selectRawDescendantWildcard(raw, path.rawDescendantSteps, path.rawDescendantKeys)
 			} else if len(path.rawWildcardSteps) > 0 {
 				text, found, compatible = selectRawNestedWildcards(raw, path.rawWildcardSteps)
 			} else if path.advanced != nil {
