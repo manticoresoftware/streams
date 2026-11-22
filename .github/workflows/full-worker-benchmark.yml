@@ -73,6 +73,7 @@ jobs:
           bash -n .github/scripts/k8s/full-worker-benchmark.sh
           python3 -m py_compile .github/scripts/k8s/compare-full-worker-output.py \
             .github/scripts/k8s/report-full-worker-benchmark.py
+          python3 -m unittest discover -s .github/scripts/k8s -p 'test_full_worker_output.py'
       - name: Install K3s
         run: bash .github/scripts/k8s/install-k3s.sh
       - name: Materialize development chart version
@@ -143,6 +144,7 @@ jobs:
             artifacts/full-worker-benchmark/*.md
             artifacts/full-worker-benchmark/*-comparison.json
             artifacts/full-worker-benchmark/*.times
+            artifacts/full-worker-benchmark/*-batch-counts.log
             artifacts/full-worker-diagnostics/
           retention-days: 7
           if-no-files-found: warn

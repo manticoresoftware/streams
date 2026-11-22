@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -202,6 +204,9 @@ func (p *batchProcessor) processChunk(ctx context.Context, docs []batchDocument,
 	elapsed := time.Since(start)
 	p.metrics.observe("batch", elapsed)
 	p.metrics.processed(ctx, len(docs), matched, sent, rules, elapsed)
+	if os.Getenv("STREAMS_BENCH_TRACE") == "1" {
+		slog.Info("benchmark PQ batch", "input", len(docs), "matched", matched, "sent", sent)
+	}
 	return nil
 }
 

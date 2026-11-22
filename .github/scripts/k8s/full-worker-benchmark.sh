@@ -94,7 +94,8 @@ configure_worker() {
           .name != "MAX_THREADS" and
           .name != "OUTPUT_DOCS" and
           .name != "JSLT_CONFIG" and
-          .name != "LOG_LEVEL"
+          .name != "LOG_LEVEL" and
+          .name != "STREAMS_BENCH_TRACE"
         ))) +
         [
           {"name":"KAFKA_INPUT_TOPIC","value":$input},
@@ -105,7 +106,8 @@ configure_worker() {
           {"name":"MIN_THREADS","value":"1"},
           {"name":"MAX_THREADS","value":"1"},
           {"name":"OUTPUT_DOCS","value":"0011"},
-          {"name":"LOG_LEVEL","value":"WARN"}
+          {"name":"LOG_LEVEL","value":"INFO"},
+          {"name":"STREAMS_BENCH_TRACE","value":"1"}
         ] +
         (if $scenario == "jslt" then [{"name":"JSLT_CONFIG","value":$jslt}] else [] end))
     else . end)')
@@ -294,6 +296,10 @@ with open(path, "a", newline="", encoding="utf-8") as stream:
         f"{float(heap)/1048576:.2f}" if heap and heap.lower() != "nan" else "",
     ])
 PY
+  # No SQL query or input document is written to benchmark artifacts.
+  kubectl -n "$APP_NAMESPACE" logs "$PIPELINE-0" -c "$worker_name" --tail=-1 2>/dev/null |
+    grep -E '(Processed batch for topic|benchmark PQ batch)' > "$artifact_dir/$scenario-$batch-$rep-$implementation-batch-counts.log" || true
+  echo "Batch count diagnostics: $(wc -l < "$artifact_dir/$scenario-$batch-$rep-$implementation-batch-counts.log") lines"
   echo "Completed $tag: wall=$((end_ms-started_ms)) ms, input=$input_docs, output=$output_count, peakRSS=$peak_rss_kb KiB"
 }
 

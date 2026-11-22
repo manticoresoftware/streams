@@ -48,3 +48,16 @@ Output is `artifacts/full-worker-benchmark/measurements.csv`, `summary.md` and o
 The workflow `.github/workflows/full-worker-benchmark.yml` is deliberately separate from the normal CI. It runs once on PR changes to its implementation files, with one repetition and the large-batch modes. For a full manual run, use its `workflow_dispatch` inputs (`repetitions=3`, `batch_sizes='2 5000'`, `scenarios=all`) once the workflow is available on the default branch. During the WIP PR, changing the benchmark workflow/scripts triggers a new smoke run. To run all four cases three times without merging the PR, add the `benchmark-full-workers` label to the PR. This is an expensive job (12 Java/Go pairs, 24 worker runs); subsequent PR pushes cancel it. The smaller-input case still checks committed offsets and full output parity, not only throughput.
 
 Do **not** promote the JVM-free image to the default, merge the PR or claim production parity based on these measurements alone. Cross-check actual outputs, available memory headroom and customer JSLT compatibility.
+
+## Diagnosing batch-dependent matches
+
+A Kafka group reaching the same committed offset does not guarantee the
+workers submitted the same sequence of percolator batches. For diagnostic
+runs we capture counts per processed batch (without SQL or JSON values).
+In plain small-batch mode, output comparisons strip the added
+`matching_queries` metadata before finding candidate source offsets.
+When source JSON repeats, an offset is not necessarily uniquely identifiable.
+
+These diagnostic logs introduce minor measurement overhead, so final
+throughput should be repeated without this instrumentation after parity is
+established.
