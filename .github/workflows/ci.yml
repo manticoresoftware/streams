@@ -165,6 +165,22 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
+      - name: Check development chart version SHA edge cases
+        run: |
+          set -euo pipefail
+          tmp_chart=$(mktemp)
+          trap 'rm -f "$tmp_chart"' EXIT
+          for case in '0679384:g0679384' '1234567:1234567' '0ab1234:0ab1234'; do
+            IFS=: read -r sha expected <<< "$case"
+            cp helm-chart/Chart.yaml "$tmp_chart"
+            SHORT_SHA="$sha" bash .github/scripts/materialize-chart-version.sh "$tmp_chart"
+            version=$(sed -n 's/^version: //p' "$tmp_chart")
+            app_version=$(sed -n 's/^appVersion: //p' "$tmp_chart")
+            [[ "$version" == *-"$expected" && "$app_version" == "$version" ]] || {
+              echo "Invalid development chart version for $sha: $version / $app_version" >&2
+              exit 1
+            }
+          done
       - name: Materialize development chart version
         run: bash .github/scripts/materialize-chart-version.sh
       - run: helm lint helm-chart
