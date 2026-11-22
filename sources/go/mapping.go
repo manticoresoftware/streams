@@ -36,6 +36,8 @@ type mappingPath struct {
 	abortOnRead bool
 	quotedWildcardValue bool
 	lengthFunction bool
+	terminalFunction string
+	terminalArgs []string
 	urlCollectionPrefix []string
 	urlCollectionArrayOnly bool
 	keys        []string
@@ -265,6 +267,11 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 			if !ok && legacyInvalidJSONPath(input) {
 				// Java throws at runtime, retaining fields mapped before this path.
 				p.abortOnRead, ok = true, true
+			}
+			if !ok {
+				if function, supported := compileLegacyTerminalFunction(input); supported {
+					p, ok = function, true
+				}
 			}
 			if !ok && !strings.ContainsAny(input, "{}") && strings.HasSuffix(input, ".length()") {
 				// Jayway returns an Integer for array length and null for
@@ -760,6 +767,23 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				return m.abortMapping(originalOutput, mapped, out)
 			}
 			if rule.isURL {
+				if path.terminalFunction != "" {
+					selected, exists, abort := selectLegacyTerminalFunction(doc, path)
+					if abort {
+						return m.abortMapping(originalOutput, mapped, out)
+					}
+					if exists && selected != nil {
+						s, ok := selected.(string)
+						if !ok {
+							return m.abortMapping(originalOutput, mapped, out)
+						}
+						if !mapURLs(s, rule.target, mapped) {
+							return m.fallbackMap(originalInput, mappingFallbackURL, rule.sourceIndex, pathIndex)
+						}
+					}
+					value = ""
+					continue
+				}
 				if path.lengthFunction {
 					values := path.advanced.Get(doc)
 					if len(values) == 1 && values[0] != nil {
@@ -851,6 +875,19 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			if path.indefiniteAsScalar {
 				// Jayway produces an array that Java cannot assign to String.
 				text, found, compatible = "", false, true
+			} else if path.terminalFunction != "" {
+				selected, exists, abort := selectLegacyTerminalFunction(doc, path)
+				if abort {
+					return m.abortMapping(originalOutput, mapped, out)
+				}
+				text, found, compatible = "", false, true
+				if exists {
+					if selected == nil {
+						text, found = "null", true
+					} else if s, ok := selected.(string); ok {
+						text, found = s, true
+					}
+				}
 			} else if path.lengthFunction {
 				values := path.advanced.Get(doc)
 				text, found, compatible = "", false, true
