@@ -14,11 +14,11 @@ FROM maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eb
 WORKDIR /build
 COPY sources/src/pom.xml ./
 COPY sources/src/src/main src/main
-# Use the exact assembly plugin coordinates: prefix metadata resolution can
-# fail transiently on Maven Central even when the plugin version is pinned.
+# Use the exact assembly plugin coordinates and force Maven to recheck
+# previously cached transient 404/429 failures on retry (-U).
 RUN set -eu; \
     for attempt in 1 2 3; do \
-      if mvn -B -q -Dmaven.wagon.http.retryHandler.count=3 compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single; then \
+      if mvn -B -q -U -Dmaven.wagon.http.retryHandler.count=3 compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single; then \
         break; \
       fi; \
       if [ "$attempt" -eq 3 ]; then exit 1; fi; \
