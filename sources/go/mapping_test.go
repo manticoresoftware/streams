@@ -823,6 +823,7 @@ func TestStrictNativeMalformedDocuments(t *testing.T) {
 			{"", true}, {"null", true}, {`{"truncated":`, true},
 			{" \t \n", mode[2] == '1'},
 			{`{"title":1,}`, mode[2] == '1'},
+			{`{"items":[1,]}`, false},
 			{`{'title':'ok'}`, mode[2] == '1'},
 			{`{"title":"ok"} trailing`, mode[2] == '1'},
 			{`42`, mode[2] == '1'},

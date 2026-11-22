@@ -554,17 +554,26 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				if dynamicSelectorIsInvalid(key) {
 					return m.abortMapping(originalOutput, mapped, out)
 				}
-				if strings.ContainsAny(key, "[]") || strings.Contains(resolved, "..") {
-					expression, err := jp.ParseString("$." + resolved)
+				if strings.Contains(resolved, "...") {
+					// A malformed repeated descendant operator stops Java's
+					// mapping loop before any subsequent mapping rules.
+					return m.abortMapping(originalOutput, mapped, out)
+				}
+				if strings.Contains(resolved, "..") ||
+					(!strings.Contains(resolved, "[*]") && javaCollectionSelector.MatchString(resolved)) {
+					// Jayway returns a JSONArray, which the legacy mapper
+					// catches as a ClassCastException for non-[*] rules.
+					path.indefiniteAsScalar = true
+				} else if strings.ContainsAny(key, "[]") {
+					// ojg does not accept the '.[...]' form used by Jayway.
+					// Removing that dot preserves the original (unmodified)
+					// display path used by Java's original-field output mode.
+					expression, err := jp.ParseString(strings.ReplaceAll("$."+resolved, ".[", "["))
 					if err != nil {
-						// Java's path parser rejects this expression before it
-						// processes the following mapping rules.
 						return m.abortMapping(originalOutput, mapped, out)
 					}
 					path.advanced = expression
 					path.multi = strings.Contains(resolved, "[*]")
-					path.indefiniteAsScalar = !path.multi &&
-						(strings.Contains(resolved, "..") || dynamicSelectorIsUnion(key))
 				} else if strings.ContainsAny(key, " \t\n\r") {
 					return m.abortMapping(originalOutput, mapped, out)
 				}
@@ -594,7 +603,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					// to one string. Indefinite paths keep Java semantics.
 					values := path.advanced.Get(doc)
 					if len(values) > 1 {
-						return m.referenceMap(raw)
+						return m.referenceMap(originalInput)
 					}
 					if len(values) == 1 {
 						v, exists = values[0], true
@@ -625,7 +634,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 						return m.abortMapping(originalOutput, mapped, out)
 					}
 					if !mapURLs(s, rule.target, mapped) {
-						return m.referenceMap(raw)
+						return m.referenceMap(originalInput)
 					}
 				}
 				value = ""
@@ -652,7 +661,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				text, found, compatible = selectRawWildcard(raw, keys, path.wildcard)
 			}
 			if !compatible {
-				return m.referenceMap(raw)
+				return m.referenceMap(originalInput)
 			}
 			if !found {
 				continue
@@ -663,7 +672,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			value += text
 			if rename {
 				if err := deleteMappedSelection(out, path, keys); err != nil {
-					return m.referenceMap(raw)
+					return m.referenceMap(originalInput)
 				}
 			}
 		}

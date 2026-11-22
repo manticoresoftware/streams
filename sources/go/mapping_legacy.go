@@ -98,15 +98,26 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 		}
 		return map[string]any{}, root, raw, nil
 	}
-	if mode[2] == '1' {
-		return fail()
-	}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		if raw == "" {
 			return fail()
 		}
 		return map[string]any{}, map[string]any{}, "{}", nil
+	}
+	// JSON-smart and JsonIterator both accept trailing commas in *arrays*,
+	// including in passthrough and rename mode. Keep the original raw text
+	// for passthrough Kafka output, while mapping and JSONPath use the
+	// normalized syntax.
+	if repaired, changed := stripTrailingArrayCommas(raw); changed {
+		if root, valid := parse(repaired); valid {
+			if doc, isObject := root.(map[string]any); isObject {
+				return doc, root, repaired, nil
+			}
+		}
+	}
+	if mode[2] == '1' {
+		return fail()
 	}
 	// JSON-smart accepts single-quoted strings. JsonIterator, used by the
 	// whole_document mapping, does not accept the original invalid JSON.
@@ -117,17 +128,23 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 			}
 		}
 	}
-	// A trailing comma or extra characters after a complete JSON value
-	// causes Jayway's DocumentContext to skip the mapping in these modes,
-	// leaving an empty source document for subsequent missing-path logic.
-	if strings.Contains(raw, ",}") || strings.Contains(raw, ",]") {
+	// A trailing comma after an object property aborts Jayway's parse in
+	// new-only and original-field mode, leaving an empty mapping.
+	if strings.Contains(raw, ",}") {
 		return map[string]any{}, map[string]any{}, "{}", nil
 	}
-	var first any
+	// Jayway can read the first complete JSON value even when the input
+	// contains an invalid suffix; JsonIterator cannot, hence the earlier
+	// no-transform rejection.
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
+	var first any
 	if err := decoder.Decode(&first); err == nil {
-		return map[string]any{}, map[string]any{}, "{}", nil
+		if doc, isObject := first.(map[string]any); isObject {
+			normalized := raw[:decoder.InputOffset()]
+			return doc, first, normalized, nil
+		}
+		return map[string]any{}, first, "{}", nil
 	}
 	return fail()
 }
@@ -188,4 +205,43 @@ func normalizeSingleQuotedJSON(raw string) (string, bool) {
 		return "", false
 	}
 	return out.String(), true
+}
+
+// Remove commas immediately before array closing brackets, while preserving
+// quoted JSON strings and their escape sequences. Object trailing commas
+// follow a different Java parser path and are deliberately not accepted here.
+func stripTrailingArrayCommas(raw string) (string, bool) {
+	var result strings.Builder
+	inString, escaped, changed := false, false, false
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if inString {
+			result.WriteByte(c)
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' {
+			inString = true
+			result.WriteByte(c)
+			continue
+		}
+		if c == ',' {
+			j := i + 1
+			for j < len(raw) && (raw[j] == ' ' || raw[j] == '\n' || raw[j] == '\t' || raw[j] == '\r') {
+				j++
+			}
+			if j < len(raw) && raw[j] == ']' {
+				changed = true
+				continue
+			}
+		}
+		result.WriteByte(c)
+	}
+	return result.String(), changed
 }
