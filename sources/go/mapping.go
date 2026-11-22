@@ -225,6 +225,9 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 			if !ok && !strings.ContainsAny(input, "{}") &&
 				(fields[target] != "url" || (!strings.Contains(input, "[*]") && !strings.Contains(input, "[?("))) {
 				path := strings.TrimSpace(input)
+				// Jayway accepts an explicit [*] immediately before a
+				// filter on the same array. OJG expects the filter directly.
+				path = strings.ReplaceAll(path, "[*][?(", "[?(")
 				if strings.HasPrefix(path, "[") {
 					path = "$" + path
 				} else {
@@ -234,10 +237,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
 					// The old worker only joins collections for literal [*].
 					// Other indefinite paths cannot be cast from JSONArray to String.
-					p.indefiniteAsScalar = !p.multi && (javaCollectionSelector.MatchString(input) ||
-						strings.Contains(input, "..") || strings.Contains(input, ".*") ||
-						strings.Contains(input, "[?(") || strings.Contains(input, ", ") ||
-						strings.Contains(input, "','"))
+					p.indefiniteAsScalar = !p.multi && !expression.Normal()
 				}
 			}
 			if !ok && !strings.Contains(input, "[*]") &&
@@ -246,7 +246,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 				// Jayway regex filters also return JSONArray for text mappings.
 				p.indefiniteAsScalar, ok = true, true
 			}
-			if !ok && strings.HasPrefix(input, "$.") {
+			if !ok && (strings.HasPrefix(input, "$.") || strings.HasPrefix(input, "$[")) {
 				// Java prepends "$." even when the configured rule has "$.".
 				p.keys, ok = strings.Split(input, "."), true
 			}
@@ -371,6 +371,21 @@ func deleteMappedPath(obj map[string]any, keys []string) {
 // Delete only the selected nodes, including fields inside matching arrays.
 func deleteMappedSelection(obj map[string]any, path mappingPath, keys []string) error {
 	if path.advanced != nil {
+		// OJG's modifier cannot reliably handle a descent in the middle
+		// of a removal expression. Evaluate its prefix, then remove the
+		// suffix at each descendant node. The JSON document is acyclic.
+		for i, frag := range path.advanced {
+			if _, descendant := frag.(jp.Descent); descendant {
+				prefix := path.advanced[:i]
+				suffix := path.advanced[i+1:]
+				for _, node := range prefix.Get(obj) {
+					if err := removeMappedDescendants(node, suffix); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+		}
 		_, err := path.advanced.Remove(obj)
 		return err
 	}
@@ -387,6 +402,32 @@ func deleteMappedSelection(obj map[string]any, path mappingPath, keys []string) 
 	}
 	_, err := expr.Remove(obj)
 	return err
+}
+
+func removeMappedDescendants(node any, suffix jp.Expr) error {
+	if len(suffix) == 0 {
+		return nil
+	}
+	// Descendant selection evaluates the suffix at every reachable
+	// container, including the selected node itself.
+	if _, err := suffix.Remove(node); err != nil {
+		return err
+	}
+	switch v := node.(type) {
+	case map[string]any:
+		for _, child := range v {
+			if err := removeMappedDescendants(child, suffix); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if err := removeMappedDescendants(child, suffix); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Original-field output deep-merges each selection, keeping the first
