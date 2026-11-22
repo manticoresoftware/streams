@@ -44,7 +44,7 @@ func TestMappingFallbackAuditInstrumentation(t *testing.T) {
 	t.Setenv("STREAMS_NATIVE_ONLY", "1")
 	m := newMapper([]string{
 		"before => before",
-		"connection.{kind with spaces}.code => selected",
+		"connection.{kind!bang}.code => selected",
 	}, map[string]string{"before": "text", "selected": "text"}, "1000")
 	defer m.reference.close()
 	if !m.needsReference {
