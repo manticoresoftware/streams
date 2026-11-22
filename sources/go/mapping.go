@@ -50,6 +50,7 @@ type mapper struct {
 	referenceCalls         atomic.Uint64
 	needsReference         bool
 	passThroughWithoutRule bool
+	fallbackAudit          mappingFallbackAudit
 }
 
 var simpleKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -238,7 +239,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		Output string            `json:"output"`
 	}{rules, fields, output})
 	m := &mapper{output: output, reference: javaReference("map", string(cfg)), passThroughWithoutRule: rules == nil}
-	for _, rule := range rules {
+	for ruleIndex, rule := range rules {
 		parts := strings.Split(rule, "=>")
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
 			continue
@@ -246,7 +247,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		target := strings.TrimSpace(parts[1])
 		_, hasType := fields[target]
 		r := mappingRule{target: target, isURL: fields[target] == "url", hasType: hasType}
-		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
+		for pathIndex, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 
 			p, ok := compileMappingPath(input)
 			if !ok && legacyInvalidJSONPath(input) {
@@ -316,6 +317,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 			}
 			if !ok {
 				m.needsReference = true
+				m.fallbackAudit.addCompileIssue(ruleIndex, pathIndex)
 			}
 			r.paths = append(r.paths, p)
 		}
@@ -629,7 +631,8 @@ func (m *mapper) abortMapping(raw string, mapped, output map[string]any) (any, s
 
 func (m *mapper) transform(raw string) (any, string, error) {
 	if m.needsReference {
-		return m.referenceMap(raw)
+		issue := m.fallbackAudit.firstCompileIssue()
+		return m.fallbackMap(raw, mappingFallbackUnsupportedRule, issue.ruleIndex, issue.pathIndex)
 	}
 	if m.passThroughWithoutRule {
 		return json.RawMessage(raw), "null", nil
@@ -657,13 +660,13 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if rename {
 		out = sourceCopy(doc)
 	}
-	for _, rule := range m.rules {
+	for ruleIndex, rule := range m.rules {
 		if _, exists := mapped[rule.target]; exists {
 			continue
 		}
 		last := []string{""}
 		var value string
-		for _, path := range rule.paths {
+		for pathIndex, path := range rule.paths {
 			if path.abortOnRead {
 				return m.abortMapping(originalOutput, mapped, out)
 			}
@@ -820,7 +823,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 						return m.abortMapping(originalOutput, mapped, out)
 					}
 					if !mapURLs(s, rule.target, mapped) {
-						return m.referenceMap(originalInput)
+						return m.fallbackMap(originalInput, mappingFallbackURL, ruleIndex, pathIndex)
 					}
 				}
 				value = ""
@@ -857,7 +860,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				text, found, compatible = selectRawWildcard(raw, keys, path.wildcard)
 			}
 			if !compatible {
-				return m.referenceMap(originalInput)
+				return m.fallbackMap(originalInput, mappingFallbackValue, ruleIndex, pathIndex)
 			}
 			if !found {
 				continue
@@ -868,7 +871,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			value += text
 			if rename {
 				if err := deleteMappedSelection(out, path, keys); err != nil {
-					return m.referenceMap(originalInput)
+					return m.fallbackMap(originalInput, mappingFallbackRename, ruleIndex, pathIndex)
 				}
 			}
 		}

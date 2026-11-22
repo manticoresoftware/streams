@@ -55,10 +55,21 @@ jobs:
           test -n "$worker_jar"
           mkdir -p /tmp/streams-jslt-compat
           javac -cp "$worker_jar" -d /tmp/streams-jslt-compat sources/go/compat/StreamsCompat.java
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/mapping-audit"
           cd sources/go
-          STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
+          STREAMS_MAPPING_AUDIT_OUTPUT="$GITHUB_WORKSPACE/artifacts/mapping-audit/report.json" \
+            STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
             STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
-            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity)$' -v .
+            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestMappingFallbackAudit)$' -v .
+
+      - name: Upload synthetic mapping fallback audit
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: mapping-fallback-audit
+          path: artifacts/mapping-audit/report.json
+          retention-days: 14
+          if-no-files-found: warn
 
   image-build:
     needs: worker-tests
