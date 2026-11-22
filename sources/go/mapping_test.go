@@ -799,49 +799,47 @@ func TestReferenceTransforms(t *testing.T) {
  						}
  					})
  				}
- 				t.Logf("%d/%d inputs required Java fallback: %v",len(fallbackNames),len(inputs),fallbackNames)
+ 				if len(fallbackNames) > 0 {
+					t.Fatalf("%d/%d inputs still required Java fallback: %v", len(fallbackNames), len(inputs), fallbackNames)
+				}
+				t.Logf("%d/%d input shapes handled natively with Java output/error parity",len(inputs),len(inputs))
  			})
  		}
  	}
  }
  
 
- // Malformed and null-root documents have legacy Java parser behavior that
-// cannot be reproduced by blindly returning an empty mapping. Strict native
-// mode must reject them without silently discarding a document or launching Java.
+ // Malformed documents must follow the Java behavior without starting the
+// compatibility bridge: strict input errors remain errors, while JSON-smart's
+// lenient forms and non-object roots are handled in the supported modes.
 func TestStrictNativeMalformedDocuments(t *testing.T) {
 	t.Setenv("STREAMS_NATIVE_ONLY", "1")
-	for _,mode := range []string{"1000", "0100", "1010", "0010", "0011"} {
-		for _,raw := range []string{"", " \t \n", "null", " \n null \t", `{"truncated":`} {
-			t.Run(mode+"/"+strconv.Quote(raw),func(t *testing.T) {
-				m := newMapper([]string{"title => title"},map[string]string{"title":"text"},mode)
-				_,_,err := m.transform(raw)
-				if err == nil || !strings.Contains(err.Error(),"hybrid worker") {
-					t.Fatalf("expected an explicit legacy compatibility error, got %v",err)
+	for _, mode := range []string{"1000", "0100", "1010", "0010", "0011"} {
+		for _, tc := range []struct {
+			raw string
+			fails bool
+		}{
+			{"", true}, {"null", true}, {`{"truncated":`, true},
+			{" \t \n", mode[2] == '1'},
+			{`{"title":1,}`, mode[2] == '1'},
+			{`{'title':'ok'}`, mode[2] == '1'},
+			{`{"title":"ok"} trailing`, mode[2] == '1'},
+			{`42`, mode[2] == '1'},
+			{`"hello"`, mode[2] == '1'},
+			{`true`, mode[2] == '1'},
+			{`[{"title":"ok"}]`, mode[2] == '1'},
+		} {
+			t.Run(mode+"/"+strconv.Quote(tc.raw),func(t *testing.T) {
+				m := newMapper([]string{"title => title"}, map[string]string{"title":"text"}, mode)
+				defer m.reference.close()
+				_, _, err := m.transform(tc.raw)
+				if (err != nil) != tc.fails {
+					t.Fatalf("mode %s: expected error=%t, got %v", mode, tc.fails, err)
 				}
-				if m.reference.cmd != nil {
-					t.Fatal("strict native mode unexpectedly started Java")
+				if m.reference.cmd != nil || m.referenceCalls.Load() != 0 {
+					t.Fatal("native-only mapping launched Java")
 				}
 			})
-		}
-	}
-}
-
-// A non-object JSON root leaves the legacy Java mapper without a valid
-// output document. Native-only mode must not silently acknowledge it.
-func TestStrictNativeNonObjectRoots(t *testing.T) {
-	t.Setenv("STREAMS_NATIVE_ONLY", "1")
-	for _, mode := range []string{"0010", "0011", "1010", "1011"} {
-		for _, raw := range []string{`42`, `"hello"`, `true`, `[]`, `[{"items":["One"]}]`} {
-			m := newMapper([]string{"whole_document => json", "items[*] => selected"},
-				map[string]string{"json": "json", "selected": "text"}, mode)
-			_, _, err := m.transform(raw)
-			if err == nil || !strings.Contains(err.Error(), "hybrid worker") {
-				t.Fatalf("mode %s input %q: expected compatibility error, got %v", mode, raw, err)
-			}
-			if m.reference.cmd != nil {
-				t.Fatal("native-only mode unexpectedly started Java")
-			}
 		}
 	}
 }

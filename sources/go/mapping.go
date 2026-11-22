@@ -489,17 +489,18 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if m.passThroughWithoutRule {
 		return json.RawMessage(raw), "null", nil
 	}
-	var doc map[string]any
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	if err := decoder.Decode(&doc); err != nil || doc == nil || strings.TrimSpace(raw[decoder.InputOffset():]) != "" {
-		return m.referenceMap(raw)
+	doc, sourceRoot, normalizedRaw, err := parseLegacyMappingDocument(raw, m.output)
+	if err != nil {
+		return nil, "", err
 	}
+	originalInput := raw
+	raw = normalizedRaw
 	// Mapped documents use Java's normalized numeric representation, even
 	// for whole_document. The no-transform output, however, preserves the
 	// original JSON tokens (for example 2.5e1 instead of 25.0).
 	normalizeJavaJSONNumbers(doc)
-	originalOutput := raw
+	sourceRoot = normalizeJavaJSONNumbers(sourceRoot)
+	originalOutput := originalInput
 	mapped := map[string]any{}
 	// JsonIterator keeps whole_document's original number tokens when
 	// serializing the new-only Kafka output, but the mapped/PQ representation
@@ -520,8 +521,10 @@ func (m *mapper) transform(raw string) (any, string, error) {
 		for _, path := range rule.paths {
 			keys := path.keys
 			if len(keys) == 1 && keys[0] == "whole_document" {
-				mapped[rule.target] = doc
-				rawWholeDocuments[rule.target] = json.RawMessage(raw)
+				// The legacy whole_document rule maps any valid JSON root,
+				// including strings, numbers and arrays (not just objects).
+				mapped[rule.target] = sourceRoot
+				rawWholeDocuments[rule.target] = json.RawMessage(originalInput)
 				continue
 			}
 			if path.placeholder != "" {
