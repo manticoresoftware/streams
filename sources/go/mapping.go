@@ -529,36 +529,42 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				if !exists {
 					continue
 				}
-				key, ok := v.(string)
+				key, ok := javaDynamicSelector(raw, path.from, v)
 				if !ok {
-					// Java substitutes the string form of scalar selector values.
-					switch v := v.(type) {
-					case json.Number:
-						// Jayway parses decimal and exponent tokens as Java doubles.
-						// Their toString form can differ from the JSON token (1e1 -> 10.0).
-						key, ok = javaNumberText(v.String())
-						if !ok {
-							return m.referenceMap(raw)
-						}
-					case bool:
-						key = strconv.FormatBool(v)
-					case nil:
-						// In Java, null.toString() aborts the mapping loop.
-						return m.abortMapping(originalOutput, mapped, out)
-					default:
-						return m.referenceMap(raw)
-					}
-				}
-				// A dot in the substituted value is another path segment in
-				// Jayway, not a literal key containing a dot.
-				segments := strings.Split(key, ".")
-				for _, segment := range segments {
-					if !nativeDynamicPathSegment(segment) {
-						return m.referenceMap(raw)
-					}
+					// A null selector calls toString() on null in Java. A
+					// syntactically invalid selector throws inside the legacy
+					// mapping loop. Both retain fields already mapped.
+					return m.abortMapping(originalOutput, mapped, out)
 				}
 				resolved := strings.ReplaceAll(strings.Join(keys, "."), "{}", key)
 				keys = strings.Split(resolved, ".")
+				// Keep the *literal* token for original-field output, but use
+				// Jayway-compatible JSONPath semantics for selection/deletion.
+				// In particular ["x"] selects x, [0] indexes an array, and
+				// multi-element unions produce a collection that Java cannot
+				// cast to String. A wildcard is joined with trailing newlines.
+				path.advanced = nil
+				path.rawWildcardSteps = nil
+				path.indefiniteAsScalar = false
+				path.multi = false
+				path.wildcard = -1
+				if dynamicSelectorIsInvalid(key) {
+					return m.abortMapping(originalOutput, mapped, out)
+				}
+				if strings.ContainsAny(key, "[]") || strings.Contains(resolved, "..") {
+					expression, err := jp.ParseString("$." + resolved)
+					if err != nil {
+						// Java's path parser rejects this expression before it
+						// processes the following mapping rules.
+						return m.abortMapping(originalOutput, mapped, out)
+					}
+					path.advanced = expression
+					path.multi = strings.Contains(resolved, "[*]")
+					path.indefiniteAsScalar = !path.multi &&
+						(strings.Contains(resolved, "..") || dynamicSelectorIsUnion(key))
+				} else if strings.ContainsAny(key, " \t\n\r") {
+					return m.abortMapping(originalOutput, mapped, out)
+				}
 			}
 			// In Java, checkFieldType(...).equals("url") throws for a
 			// missing field type, even when the selected JSON path is absent.
