@@ -59,7 +59,8 @@ scale_down() {
 # are comparable. The PVC and percolate rules persist across repetitions.
 configure_worker() {
   local implementation=$1 input=$2 output=$3 group=$4 batch=$5 scenario=$6
-  local image probe
+  local image probe poll_size=$batch
+  if (( poll_size > 500 )); then poll_size=500; fi
   if [[ "$implementation" == "java" ]]; then
     image="ghcr.io/manticoresoftware/streams/worker-java-benchmark:$image_tag"
     probe="/metrics" # Original Java HTTPServer has /metrics but no /live.
@@ -72,7 +73,7 @@ configure_worker() {
     jq -c --arg worker "$worker_name" --arg implementation "$implementation" \
       --arg image "$image" --arg probe "$probe" --arg input "$input" \
       --arg output "$output" --arg group "$group" --arg batch "$batch" \
-      --arg scenario "$scenario" --arg jslt "$jslt_expression" '
+      --arg scenario "$scenario" --arg jslt "$jslt_expression" --arg poll "$poll_size" '
     .spec.template.spec.containers |
     map(if .name == $worker then
       .image = $image |
@@ -88,6 +89,7 @@ configure_worker() {
           .name != "KAFKA_OUTPUT_TOPIC" and
           .name != "KAFKA_GROUP_NAME" and
           .name != "MAX_BATCH_SIZE" and
+          .name != "KAFKA_MAX_POLL_RECORDS" and
           .name != "MIN_THREADS" and
           .name != "MAX_THREADS" and
           .name != "OUTPUT_DOCS" and
@@ -99,6 +101,7 @@ configure_worker() {
           {"name":"KAFKA_OUTPUT_TOPIC","value":$output},
           {"name":"KAFKA_GROUP_NAME","value":$group},
           {"name":"MAX_BATCH_SIZE","value":$batch},
+          {"name":"KAFKA_MAX_POLL_RECORDS","value":$poll},
           {"name":"MIN_THREADS","value":"1"},
           {"name":"MAX_THREADS","value":"1"},
           {"name":"OUTPUT_DOCS","value":"0011"},

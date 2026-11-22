@@ -60,7 +60,7 @@ jobs:
       K3S_VERSION: v1.32.5+k3s1
       K3S_BINARY_SHA256: 9624ef0534b1be432b4ce8dd94dcd7241ed02451d970a4d38943baccf5c60dce
       BENCH_REPETITIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.repetitions || github.event.action == 'labeled' && '3' || '1' }}
-      BENCH_BATCH_SIZES: ${{ github.event_name == 'workflow_dispatch' && inputs.batch_sizes || github.event.action == 'labeled' && '5000 2' || '5000' }}
+      BENCH_BATCH_SIZES: ${{ github.event_name == 'workflow_dispatch' && inputs.batch_sizes || github.event.action == 'labeled' && '2 5000' || '2' }}
       BENCH_SMALL_INPUT_DOCS: 1000
       BENCH_SCENARIOS: ${{ github.event_name == 'workflow_dispatch' && inputs.scenarios || 'all' }}
     steps:

@@ -15,7 +15,7 @@ The Kafka group is initialized and reset to offset zero before starting the work
 
 ## Scenarios
 
-The smoke benchmark on PR updates uses one Java/Go pair at max batch size 5,000, both with and without JSLT. Applying the `benchmark-full-workers` PR label triggers **three alternating-order pairs per case**:
+The smoke benchmark on PR updates uses one Java/Go pair at max batch size 2 on a 1,000-document prefix, both with and without JSLT. Applying the `benchmark-full-workers` PR label triggers **three alternating-order pairs per case**, running the small-batch cases first:
 
 | Case | Max batch size | Input docs | JSLT |
 | --- | ---: | ---: | --- |
@@ -26,7 +26,9 @@ The smoke benchmark on PR updates uses one Java/Go pair at max batch size 5,000,
 
 The JSLT uses **synthetic** `replace()` and `parse-url()` transformations over the E2E output; no real customer expression or Kafka document is committed.
 
-Java and Go alternate their execution order across repetitions to reduce the effect of cache warming. For each pair, a Python script canonicalizes every output JSON record and compares **multisets**, including duplicate counts (not only topic offsets or hashes). Any mismatch is a test failure.
+The Java consumer's default `KAFKA_MAX_POLL_RECORDS=500` can silently increase the effective processing batch to 500 even when `MAX_BATCH_SIZE=2`. In the benchmark the poll limit is therefore capped at `min(MAX_BATCH_SIZE, 500)` for **both** workers, so max-batch-2 runs actually process at most two Kafka records per poll. Without this safeguard a previous comparison yielded 160 Java vs 134 Go outputs, but used different effective batch sizes and was invalid for parity conclusions.
+
+Java and Go alternate their execution order across repetitions to reduce the effect of cache warming. For each pair, a Python script canonicalizes every output JSON record and compares **multisets**, including duplicate counts (not only topic offsets or hashes). Any mismatch is a test failure. If the output counts differ, the benchmark saves both totals, multiset differences and example SHA-256 fingerprints of unmatched documents, without uploading raw Kafka payloads.
 
 ## Metrics
 
