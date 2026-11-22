@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--go", required=True)
     parser.add_argument("--expected", type=int, default=9418)
     parser.add_argument("--scenario", required=True)
+    parser.add_argument("--input", help="Input JSONL for hashed source offset diagnostics")
     parser.add_argument("--report", required=True)
     args = parser.parse_args()
     java, java_sha, java_total = load(args.java)
@@ -40,6 +41,28 @@ def main():
     missing = java - go
     extra = go - java
     equal = java == go and java_total == args.expected and go_total == args.expected
+    missing_offsets = []
+    extra_offsets = []
+    input_not_found = 0
+    if args.input and (missing or extra):
+        # OUTPUT_DOCS=0011 sends unchanged input JSON for the plain
+        # benchmark. Resolve matched records back to source offsets by
+        # canonical JSON equality. Never include raw document contents in
+        # CI logs or uploaded artifacts.
+        seen = collections.Counter()
+        with Path(args.input).open(encoding="utf-8") as stream:
+            for offset, line in enumerate(stream):
+                try:
+                    normalized = json.dumps(json.loads(line), ensure_ascii=False,
+                                            sort_keys=True, separators=(",", ":"))
+                except json.JSONDecodeError:
+                    continue
+                seen[normalized] += 1
+                if seen[normalized] <= missing[normalized]:
+                    missing_offsets.append(offset)
+                if seen[normalized] <= extra[normalized]:
+                    extra_offsets.append(offset)
+        input_not_found = sum(missing.values()) - len(missing_offsets)
 
     # The records in this public-fixture comparison can be large. Write
     # anonymous hashes and counts, never raw output documents, to CI artifacts.
@@ -60,6 +83,10 @@ def main():
         "extra_in_go": sum(extra.values()),
         "missing_fingerprints": fingerprints(missing),
         "extra_fingerprints": fingerprints(extra),
+        "missing_input_offsets_zero_based": missing_offsets[:100],
+        "extra_input_offsets_zero_based": extra_offsets[:100],
+        "missing_not_found_in_input": input_not_found,
+        "missing_input_offset_range": [min(missing_offsets), max(missing_offsets)] if missing_offsets else [],
         "equal": equal,
     }
     Path(args.report).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -68,6 +95,9 @@ def main():
     if not equal:
         print(f"DIFFERENT OUTPUT: missing from Go {sum(missing.values())}, "
               f"extra in Go {sum(extra.values())}; see hashed discrepancy report")
+        if args.input:
+            print(f"Source offsets missing from Go (zero-based, first 100): {missing_offsets[:100]}")
+            print(f"Missing records not attributable to verbatim input: {input_not_found}")
         raise SystemExit(1)
     print("Output multisets match, including duplicate counts.")
 

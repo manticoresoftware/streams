@@ -317,14 +317,24 @@ for scenario in "${scenarios[@]}"; do
       # Java determines the small-fixture output count; exact multiset parity
       # is still required when the Go run comes first on even repetitions.
       expected_output=$(awk '{print $3}' "$artifact_dir/${base_run_id}-$scenario-$batch-$rep-java.times")
+      # On a mismatch in the small-batch plain case, identify which source
+      # offsets Go omitted. The comparator exports only offsets and hashes,
+      # never the public fixture or raw Kafka payloads.
+      source_args=()
+      source_file="$artifact_dir/$scenario-$batch-$rep-source.jsonl"
+      if [[ "$scenario" == "plain" && "$batch" == "2" ]]; then
+        kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- \
+          head -n "$BENCH_SMALL_INPUT_DOCS" /tmp/test_data.json > "$source_file"
+        source_args=(--input "$source_file")
+      fi
       python3 .github/scripts/k8s/compare-full-worker-output.py \
         --java "$artifact_dir/$scenario-$batch-$rep-java.jsonl" \
         --go "$artifact_dir/$scenario-$batch-$rep-go.jsonl" \
         --expected "$expected_output" --scenario "$scenario/$batch/$rep" \
-        --report "$artifact_dir/$scenario-$batch-$rep-comparison.json"
-      # The output multiset digest is retained, but full Kafka payloads are not
-      # uploaded with the benchmark artifact.
-      rm "$artifact_dir/$scenario-$batch-$rep-"*.jsonl
+        --report "$artifact_dir/$scenario-$batch-$rep-comparison.json" \
+        "${source_args[@]}"
+      # Raw Kafka payloads are not uploaded with benchmark artifacts.
+      rm -f "$source_file" "$artifact_dir/$scenario-$batch-$rep-"*.jsonl
     done
   done
 done

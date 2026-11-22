@@ -14,8 +14,18 @@ FROM maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eb
 WORKDIR /build
 COPY sources/src/pom.xml ./
 COPY sources/src/src/main src/main
-RUN mvn -B -q compile assembly:single \
-    && cp target/*-jar-with-dependencies.jar /KafkaHandler.jar
+# Use the exact assembly plugin coordinates: prefix metadata resolution can
+# fail transiently on Maven Central even when the plugin version is pinned.
+RUN set -eu; \
+    for attempt in 1 2 3; do \
+      if mvn -B -q -Dmaven.wagon.http.retryHandler.count=3 compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single; then \
+        break; \
+      fi; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      echo "Transient Maven failure while assembling Java compatibility JAR; retrying" >&2; \
+      sleep 5; \
+    done; \
+    cp target/*-jar-with-dependencies.jar /KafkaHandler.jar
 COPY sources/go/compat/StreamsCompat.java /tmp/StreamsCompat.java
 RUN mkdir /compat && javac -cp /KafkaHandler.jar -d /compat /tmp/StreamsCompat.java
 

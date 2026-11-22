@@ -70,9 +70,10 @@ func TestFixtureMappingFallbacks(t *testing.T) {
 		if m.referenceCalls.Load() != before {
 			fallbackOffsets = append(fallbackOffsets, count)
 		}
-		// Verify outputs as well as the fallback count. A fixed stride covers
-		// the entire public fixture without starting Java for every record.
-		if count == 1 || count%173 == 0 || count == 43403 {
+		// Compare *every* document in the small-batch benchmark corpus with
+		// Java. The remaining 42k fixture documents are sampled at fixed
+		// intervals to keep the CI differential suite bounded.
+		if count <= 1000 || count%173 == 0 || count == 43403 {
 			wantMapped, wantOutput, err := m.referenceMap(raw)
 			if err != nil {
 				t.Fatalf("Java reference for fixture record %d: %v", count, err)
