@@ -25,6 +25,15 @@ func TestLegacyTerminalFunctionParity(t *testing.T) {
 		{"concat array", `{"before":"first","items":["red","blue"],"after":"last"}`, "items.concat(\"!\")", "text"},
 		{"concat numbers", `{"before":"first","items":[1,2,3],"after":"last"}`, "items.concat(\"!\")", "text"},
 		{"URL first", `{"before":"first","items":["https://example.org/a","https://example.net/b"],"after":"last"}`, "items.first()", "url"},
+		{"sum numeric", `{"before":"first","values":[1,2,3],"after":"last"}`, "values.sum()", "text"},
+		{"min numeric", `{"before":"first","values":[1,2,3],"after":"last"}`, "values.min()", "text"},
+		{"max numeric", `{"before":"first","values":[1,2,3],"after":"last"}`, "values.max()", "text"},
+		{"avg floats", `{"before":"first","values":[1.5,2.5],"after":"last"}`, "values.avg()", "text"},
+		{"stddev mixed", `{"before":"first","values":[1,null,"x"],"after":"last"}`, "values.stddev()", "text"},
+		{"min string abort", `{"before":"first","values":["a","b"],"after":"last"}`, "values.min()", "text"},
+		{"sum empty abort", `{"before":"first","values":[],"after":"last"}`, "values.sum()", "text"},
+		{"max scalar abort", `{"before":"first","values":42,"after":"last"}`, "values.max()", "text"},
+		{"URL sum abort", `{"before":"first","values":[1,2,3],"after":"last"}`, "values.sum()", "url"},
 	}
 	for _, tc := range cases {
 		for _, mode := range []string{"1000", "0100", "1010", "0010"} {

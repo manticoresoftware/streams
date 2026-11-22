@@ -10,7 +10,7 @@ import (
 
 // Jayway's terminal path functions are evaluated after selecting their input.
 // They are not fields literally named "first()" or "concat(...)".
-var legacyTerminalFunction = regexp.MustCompile(`^(.+)\.(first|last|keys|concat)\((.*)\)$`)
+var legacyTerminalFunction = regexp.MustCompile(`^(.+)\.(first|last|keys|concat|sum|min|max|avg|stddev)\((.*)\)$`)
 
 // The parser accepts only a deliberately unambiguous grammar here. Unsupported
 // expressions remain available to the Java oracle until proven equivalent.
@@ -82,6 +82,26 @@ func selectLegacyTerminalFunction(root map[string]any, path mappingPath) (value 
 			return []any{}, true, false
 		}
 		return nil, true, false
+	case "sum", "min", "max", "avg", "stddev":
+		values, ok := node.([]any)
+		if !ok {
+			return nil, false, true
+		}
+		var hasNumber bool
+		for _, item := range values {
+			switch item.(type) {
+			case json.Number, int, int64, float64:
+				hasNumber = true
+			}
+		}
+		if !hasNumber {
+			// Jayway rejects empty arrays or arrays with no numeric values.
+			return nil, false, true
+		}
+		// The actual numeric value is never exposed by the old worker:
+		// assigning its Number to String is caught for text fields and
+		// aborts the current document for URL fields.
+		return json.Number("0"), true, false
 	case "concat":
 		var b strings.Builder
 		if values, ok := node.([]any); ok {

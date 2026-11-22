@@ -117,6 +117,10 @@ func TestMappingFallbackAudit(t *testing.T) {
 		{"length of object", "object", `{"before":"first","items":{"a":1,"b":2},"after":"last"}`, "items.length()", "text"},
 		{"sum numeric array", "array", `{"before":"first","nums":[1,2,3],"after":"last"}`, "nums.sum()", "text"},
 		{"min string array abort", "array", `{"before":"first","items":["red","blue"],"after":"last"}`, "items.min()", "text"},
+		{"avg floating array", "array", `{"before":"first","nums":[1.5,2.5],"after":"last"}`, "nums.avg()", "text"},
+		{"stddev mixed array", "array", `{"before":"first","nums":[1,null,"x"],"after":"last"}`, "nums.stddev()", "text"},
+		{"max empty array abort", "array", `{"before":"first","nums":[],"after":"last"}`, "nums.max()", "text"},
+		{"URL numeric function", "array", `{"before":"first","nums":[1,2,3],"after":"last"}`, "nums.sum()", "url"},
 		{"URL first element", "array", `{"before":"first","items":["https://example.org/a","https://example.net/b"],"after":"last"}`, "items.first()", "url"},
 
 		{"computed index", "array", `{"before":"yes","items":[{"name":"Ann"}],"after":"end"}`, "items[(@.length-1)].name", "text"},
