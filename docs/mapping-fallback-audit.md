@@ -71,3 +71,34 @@ even if the report file is successfully generated.
 This audit is a **coverage instrument**, not a claim to exhaustively test all
 possible JSON documents or all extensions of Jayway JSONPath. The goal is to
 make the remaining gap explicit and shrink it until Java is no longer needed.
+
+## Checking actual production rule sets without production documents
+
+A separate optional test can inspect local configurations **without making
+Kafka connections, processing documents, or launching Java**. Create a local
+JSON file containing an array of the existing rules and field definitions:
+
+```json
+[
+  {
+    "rules": ["items[*].name => selected"],
+    "fields": {"selected": "text"},
+    "output": "1000"
+  }
+]
+```
+
+From `sources/go`:
+
+```sh
+STREAMS_MAPPING_CONFIG_AUDIT_INPUT=/path/to/local-rules.json \
+STREAMS_MAPPING_CONFIG_AUDIT_OUTPUT=/tmp/mapping-config-audit.json \
+go test -count=1 -run '^TestMappingConfigurationAudit$' -v .
+```
+
+The output contains only profile indices, output modes, counts of rules and
+indices of statically unsupported paths. It intentionally does **not** emit
+rule expressions, field names or any input document. A successful static
+compile is not proof of runtime equivalence; data-dependent JSONPath and URL
+behavior must still pass the differential tests described above. Keep local
+customer rule files outside the Git repository and CI artifacts.

@@ -19,6 +19,7 @@ import (
 )
 
 type mappingRule struct {
+	sourceIndex int
 	target   string
 	isURL    bool
 	hasType  bool
@@ -95,8 +96,19 @@ func legacyInvalidJSONPath(path string) bool {
 			quote = c
 			continue
 		}
-		if strings.HasPrefix(path[i:], "[(@") {
+		if strings.HasPrefix(path[i:], "[(@") || strings.HasPrefix(path[i:], "[??") {
+			// Both computed-index syntax and malformed double predicates
+			// throw in the installed Jayway version.
 			return true
+		}
+		if c == '{' {
+			if end := strings.IndexByte(path[i+1:], '}'); end >= 0 &&
+				strings.ContainsAny(path[i+1:i+1+end], " \t\r\n") {
+				// The Java implementation prepends "$." to the
+				// substituted key name. An unquoted key containing
+				// whitespace is an invalid Jayway path, not a field.
+				return true
+			}
 		}
 		if c == '[' {
 			depth++
@@ -246,7 +258,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		}
 		target := strings.TrimSpace(parts[1])
 		_, hasType := fields[target]
-		r := mappingRule{target: target, isURL: fields[target] == "url", hasType: hasType}
+		r := mappingRule{sourceIndex: ruleIndex, target: target, isURL: fields[target] == "url", hasType: hasType}
 		for pathIndex, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
 
 			p, ok := compileMappingPath(input)
@@ -660,7 +672,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 	if rename {
 		out = sourceCopy(doc)
 	}
-	for ruleIndex, rule := range m.rules {
+	for _, rule := range m.rules {
 		if _, exists := mapped[rule.target]; exists {
 			continue
 		}
@@ -823,7 +835,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 						return m.abortMapping(originalOutput, mapped, out)
 					}
 					if !mapURLs(s, rule.target, mapped) {
-						return m.fallbackMap(originalInput, mappingFallbackURL, ruleIndex, pathIndex)
+						return m.fallbackMap(originalInput, mappingFallbackURL, rule.sourceIndex, pathIndex)
 					}
 				}
 				value = ""
@@ -860,7 +872,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				text, found, compatible = selectRawWildcard(raw, keys, path.wildcard)
 			}
 			if !compatible {
-				return m.fallbackMap(originalInput, mappingFallbackValue, ruleIndex, pathIndex)
+				return m.fallbackMap(originalInput, mappingFallbackValue, rule.sourceIndex, pathIndex)
 			}
 			if !found {
 				continue
@@ -871,7 +883,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			value += text
 			if rename {
 				if err := deleteMappedSelection(out, path, keys); err != nil {
-					return m.fallbackMap(originalInput, mappingFallbackRename, ruleIndex, pathIndex)
+					return m.fallbackMap(originalInput, mappingFallbackRename, rule.sourceIndex, pathIndex)
 				}
 			}
 		}
