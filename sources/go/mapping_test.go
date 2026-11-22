@@ -232,10 +232,11 @@ func TestStrictNativeMapper(t *testing.T) {
 	if err := mapper.requireNativeSupport(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := mapper.transform(`{"kind":{"nested":"unexpected"},"connection":{}}`); err == nil ||
-		!strings.Contains(err.Error(), "hybrid worker") {
-		t.Fatalf("runtime Java fallback was not clearly rejected: %v", err)
+	_, output, err := mapper.transform(`{"kind":{"nested":"unexpected"},"connection":{}}`)
+	if err != nil {
+		t.Fatalf("native object-valued dynamic selector failed: %v", err)
 	}
+	assertSameJSON(t, output, `{}`)
 	if mapper.reference.cmd != nil {
 		t.Fatal("strict native mode unexpectedly started Java")
 	}
