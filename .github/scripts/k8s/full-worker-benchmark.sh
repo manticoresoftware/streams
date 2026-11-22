@@ -15,6 +15,10 @@ BENCH_REPETITIONS="${BENCH_REPETITIONS:-1}"
 BENCH_BATCH_SIZES="${BENCH_BATCH_SIZES:-5000}"
 BENCH_SCENARIOS="${BENCH_SCENARIOS:-plain jslt}"
 BENCH_SMALL_INPUT_DOCS="${BENCH_SMALL_INPUT_DOCS:-1000}"
+# Per-batch tracing is useful for diagnosing parity, but adds uneven logging
+# overhead to the Java/Go throughput comparison. Keep it disabled by default.
+BENCH_TRACE="${BENCH_TRACE:-0}"
+[[ "$BENCH_TRACE" =~ ^[01]$ ]] || { echo "BENCH_TRACE must be 0 or 1" >&2; exit 1; }
 [[ "$BENCH_REPETITIONS" =~ ^[1-3]$ ]] || { echo "repetitions must be 1-3" >&2; exit 1; }
 [[ "$FIXTURE_RECORDS" == "43403" && "$EXPECTED_RECORDS" == "9418" ]] || { echo "unexpected fixture totals" >&2; exit 1; }
 [[ "$BENCH_SMALL_INPUT_DOCS" =~ ^[1-9][0-9]*$ ]] && (( BENCH_SMALL_INPUT_DOCS < FIXTURE_RECORDS )) || {
@@ -24,7 +28,7 @@ BENCH_SMALL_INPUT_DOCS="${BENCH_SMALL_INPUT_DOCS:-1000}"
 artifact_dir=artifacts/full-worker-benchmark
 mkdir -p "$artifact_dir"
 metrics="$artifact_dir/measurements.csv"
-printf '%s\n' 'scenario,batch_size,implementation,repetition,input_docs,output_records,wall_s,docs_per_s,first_s,peak_rss_mib,end_rss_mib,cpu_s,heap_mib' > "$metrics"
+printf '%s\n' 'scenario,batch_size,implementation,repetition,input_docs,output_records,wall_s,docs_per_s,first_s,peak_rss_mib,cgroup_peak_mib,end_rss_mib,cpu_s,heap_mib' > "$metrics"
 
 kafka_bin=/opt/bitnami/kafka/bin
 kafka() {
@@ -73,7 +77,7 @@ configure_worker() {
     jq -c --arg worker "$worker_name" --arg implementation "$implementation" \
       --arg image "$image" --arg probe "$probe" --arg input "$input" \
       --arg output "$output" --arg group "$group" --arg batch "$batch" \
-      --arg scenario "$scenario" --arg jslt "$jslt_expression" --arg poll "$poll_size" '
+      --arg scenario "$scenario" --arg jslt "$jslt_expression" --arg poll "$poll_size" --arg trace "$BENCH_TRACE" '
     .spec.template.spec.containers |
     map(if .name == $worker then
       .image = $image |
@@ -107,7 +111,7 @@ configure_worker() {
           {"name":"MAX_THREADS","value":"1"},
           {"name":"OUTPUT_DOCS","value":"0011"},
           {"name":"LOG_LEVEL","value":"INFO"},
-          {"name":"STREAMS_BENCH_TRACE","value":"1"}
+          {"name":"STREAMS_BENCH_TRACE","value":$trace}
         ] +
         (if $scenario == "jslt" then [{"name":"JSLT_CONFIG","value":$jslt}] else [] end))
     else . end)')
@@ -228,6 +232,10 @@ read_memory() {
   peak_rss_kb=$(awk '/^VmHWM:/ {print $2; exit}' <<<"$status")
   end_rss_kb=$(awk '/^VmRSS:/ {print $2; exit}' <<<"$status")
   [[ "$peak_rss_kb" =~ ^[0-9]+$ && "$end_rss_kb" =~ ^[0-9]+$ ]] || return 1
+  # VmHWM is only PID 1: for Java it excludes the PHP mapping subprocess.
+  # memory.peak covers the whole container cgroup for both implementations.
+  cgroup_peak_bytes=$(kubectl -n "$APP_NAMESPACE" exec "$pod" -c "$worker_name" -- cat /sys/fs/cgroup/memory.peak)
+  [[ "$cgroup_peak_bytes" =~ ^[0-9]+$ ]] || return 1
   cpu=$(kubectl -n "$APP_NAMESPACE" exec "$pod" -c "$worker_name" -- cat /sys/fs/cgroup/cpu.stat 2>/dev/null || true)
   cpu_usec=$(awk '$1 == "usage_usec" {print $2; exit}' <<<"$cpu")
   metrics_text=$(kubectl get --raw "/api/v1/namespaces/$APP_NAMESPACE/pods/$pod:8081/proxy/metrics" 2>/dev/null || true)
@@ -308,11 +316,11 @@ PY
   }
   python3 - "$metrics" "$scenario" "$batch" "$implementation" "$rep" \
     "$input_docs" "$output_count" "$started_ms" "$first_ms" "$end_ms" \
-    "$peak_rss_kb" "$end_rss_kb" "$cpu_usec" "$heap_bytes" <<'PY'
+    "$peak_rss_kb" "$cgroup_peak_bytes" "$end_rss_kb" "$cpu_usec" "$heap_bytes" <<'PY'
 import csv
 import sys
 (path, scenario, batch, implementation, rep, docs, output_count, started, first, end,
- peak, rss, cpu, heap) = sys.argv[1:]
+ peak, cgroup_peak, rss, cpu, heap) = sys.argv[1:]
 elapsed = (int(end)-int(started))/1000
 if elapsed <= 0:
     raise SystemExit("invalid elapsed time")
@@ -320,15 +328,18 @@ with open(path, "a", newline="", encoding="utf-8") as stream:
     csv.writer(stream).writerow([
         scenario, batch, implementation, rep, docs, output_count, f"{elapsed:.3f}",
         f"{int(docs)/elapsed:.2f}", f"{(int(first)-int(started))/1000:.3f}",
-        f"{int(peak)/1024:.2f}", f"{int(rss)/1024:.2f}",
+        f"{int(peak)/1024:.2f}", f"{int(cgroup_peak)/1048576:.2f}", f"{int(rss)/1024:.2f}",
         f"{int(cpu)/1_000_000:.3f}" if cpu.isdigit() else "",
         f"{float(heap)/1048576:.2f}" if heap and heap.lower() != "nan" else "",
     ])
 PY
+  # Optional diagnostics for mismatches; skip collection in timing runs.
   # No SQL query or input document is written to benchmark artifacts.
-  kubectl -n "$APP_NAMESPACE" logs "$PIPELINE-0" -c "$worker_name" --tail=-1 2>/dev/null |
-    grep -E '(Processed batch for topic|benchmark PQ batch)' > "$artifact_dir/$scenario-$batch-$rep-$implementation-batch-counts.log" || true
-  echo "Batch count diagnostics: $(wc -l < "$artifact_dir/$scenario-$batch-$rep-$implementation-batch-counts.log") lines"
+  if [[ "$BENCH_TRACE" == "1" ]]; then
+    kubectl -n "$APP_NAMESPACE" logs "$PIPELINE-0" -c "$worker_name" --tail=-1 2>/dev/null |
+      grep -E '(Processed batch for topic|benchmark PQ batch)' > "$artifact_dir/$scenario-$batch-$rep-$implementation-batch-counts.log" || true
+    echo "Batch count diagnostics: $(wc -l < "$artifact_dir/$scenario-$batch-$rep-$implementation-batch-counts.log") lines"
+  fi
   echo "Completed $tag: wall=$((end_ms-started_ms)) ms, input=$input_docs, output=$output_count, peakRSS=$peak_rss_kb KiB"
 }
 

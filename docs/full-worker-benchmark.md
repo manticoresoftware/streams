@@ -35,7 +35,8 @@ Java and Go alternate their execution order across repetitions to reduce the eff
 - Elapsed time from the new worker container's Kubernetes `startedAt` timestamp to completion of the Kafka output topic, including assignment/startup and processing.
 - Time to the first output message.
 - Effective documents per second = 43,403 / total measured elapsed time.
-- Current and peak process RSS from `/proc/1/status`.
+- Current and peak **PID 1 process RSS** from `/proc/1/status` (for Java this excludes PHP child processes).
+- **Peak full-container memory** from cgroup v2 `/sys/fs/cgroup/memory.peak`, which includes child processes, and is the preferred memory comparison between implementations.
 - Total cgroup CPU usage from `/sys/fs/cgroup/cpu.stat`, which includes child processes.
 - Sampled live-heap gauge (Java and Go use the same metric name).
 
@@ -58,6 +59,10 @@ In plain small-batch mode, output comparisons strip the added
 `matching_queries` metadata before finding candidate source offsets.
 When source JSON repeats, an offset is not necessarily uniquely identifiable.
 
-These diagnostic logs introduce minor measurement overhead, so final
-throughput should be repeated without this instrumentation after parity is
-established.
+These diagnostic logs introduce uneven measurement overhead, so `BENCH_TRACE=0`
+(the default) disables Go per-batch logs and skips collection of batch-count
+files in normal timing runs. Opt in using the `batch_diagnostics` workflow
+input for a diagnostic dispatch, or set `BENCH_TRACE=1` when running locally.
+The full three-repeat run on 22 November 2026 (#45020506508) still used
+`BENCH_TRACE=1`; repeat the matrix without tracing before treating its
+throughput numbers as final.

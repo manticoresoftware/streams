@@ -28,6 +28,10 @@ on:
         type: choice
         options: ['all', 'plain', 'jslt']
         default: 'all'
+      batch_diagnostics:
+        description: 'Enable per-batch logging for parity investigations (affects timing)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,6 +67,7 @@ jobs:
       BENCH_BATCH_SIZES: ${{ github.event_name == 'workflow_dispatch' && inputs.batch_sizes || github.event.action == 'labeled' && '2 5000' || '2' }}
       BENCH_SMALL_INPUT_DOCS: 1000
       BENCH_SCENARIOS: ${{ github.event_name == 'workflow_dispatch' && inputs.scenarios || 'all' }}
+      BENCH_TRACE: ${{ github.event_name == 'workflow_dispatch' && inputs.batch_diagnostics && '1' || '0' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1

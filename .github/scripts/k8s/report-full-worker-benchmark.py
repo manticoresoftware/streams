@@ -34,12 +34,13 @@ def main(path):
     print("First-output latency includes Kafka group assignment and initial percolator processing.")
     print("Each row is the median of the completed repetitions. CPU time is the worker container's cgroup usage.")
     print()
-    print("| Scenario | Max batch | Input docs | Output records | Worker | Repeats | Wall (s) | Documents/s | First output (s) | Peak RSS (MiB) | CPU (s) | Heap (MiB) |")
-    print("|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|")
+    print("| Scenario | Max batch | Input docs | Output records | Worker | Repeats | Wall (s) | Documents/s | First output (s) | Peak RSS (MiB) | Peak cgroup (MiB) | CPU (s) | Heap (MiB) |")
+    print("|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for (scenario, batch, implementation), rows in sorted(groups.items()):
         print(f"| {scenario} | {batch} | {rows[0]['input_docs']} | {rows[0]['output_records']} | {implementation} | {len(rows)} | "
               f"{fmt(median(rows, 'wall_s'))} | {fmt(median(rows, 'docs_per_s'))} | "
               f"{fmt(median(rows, 'first_s'))} | {fmt(median(rows, 'peak_rss_mib'))} | "
+              f"{fmt(median(rows, 'cgroup_peak_mib'))} | "
               f"{fmt(median(rows, 'cpu_s'))} | {fmt(median(rows, 'heap_mib'))} |")
     print()
     print("Output validity: every completed Java/Go pair was compared as a multiset of canonical JSON records,")
@@ -47,7 +48,8 @@ def main(path):
     print()
     print("**Caveats:** The original Java worker is started via manticore.Main with the same environment")
     print("and resource limits as the Go worker. This benchmark does not measure cold image pulls;")
-    print("CPU/RSS are cgroup and /proc metrics, not JVM heap allocations.")
+    print("CPU is a cgroup metric; peak RSS is PID 1 only. Peak cgroup memory includes child processes,\n"
+          "and is therefore the fairer container-memory comparison (not JVM heap).")
     print("No production customer records or JSLT expressions are used.")
 
 
