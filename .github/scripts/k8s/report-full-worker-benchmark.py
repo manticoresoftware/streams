@@ -34,10 +34,10 @@ def main(path):
     print("First-output latency includes Kafka group assignment and initial percolator processing.")
     print("Each row is the median of the completed repetitions. CPU time is the worker container's cgroup usage.")
     print()
-    print("| Scenario | Max batch | Worker | Repeats | Wall (s) | Documents/s | First output (s) | Peak RSS (MiB) | CPU (s) | Heap (MiB) |")
-    print("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|")
+    print("| Scenario | Max batch | Input docs | Output records | Worker | Repeats | Wall (s) | Documents/s | First output (s) | Peak RSS (MiB) | CPU (s) | Heap (MiB) |")
+    print("|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|")
     for (scenario, batch, implementation), rows in sorted(groups.items()):
-        print(f"| {scenario} | {batch} | {implementation} | {len(rows)} | "
+        print(f"| {scenario} | {batch} | {rows[0]['input_docs']} | {rows[0]['output_records']} | {implementation} | {len(rows)} | "
               f"{fmt(median(rows, 'wall_s'))} | {fmt(median(rows, 'docs_per_s'))} | "
               f"{fmt(median(rows, 'first_s'))} | {fmt(median(rows, 'peak_rss_mib'))} | "
               f"{fmt(median(rows, 'cpu_s'))} | {fmt(median(rows, 'heap_mib'))} |")

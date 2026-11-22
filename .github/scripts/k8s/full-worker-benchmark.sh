@@ -14,13 +14,17 @@ set -euo pipefail
 BENCH_REPETITIONS="${BENCH_REPETITIONS:-1}"
 BENCH_BATCH_SIZES="${BENCH_BATCH_SIZES:-5000}"
 BENCH_SCENARIOS="${BENCH_SCENARIOS:-plain jslt}"
+BENCH_SMALL_INPUT_DOCS="${BENCH_SMALL_INPUT_DOCS:-1000}"
 [[ "$BENCH_REPETITIONS" =~ ^[1-3]$ ]] || { echo "repetitions must be 1-3" >&2; exit 1; }
 [[ "$FIXTURE_RECORDS" == "43403" && "$EXPECTED_RECORDS" == "9418" ]] || { echo "unexpected fixture totals" >&2; exit 1; }
+[[ "$BENCH_SMALL_INPUT_DOCS" =~ ^[1-9][0-9]*$ ]] && (( BENCH_SMALL_INPUT_DOCS < FIXTURE_RECORDS )) || {
+  echo "small input must be 1..$((FIXTURE_RECORDS-1))" >&2; exit 1;
+}
 
 artifact_dir=artifacts/full-worker-benchmark
 mkdir -p "$artifact_dir"
 metrics="$artifact_dir/measurements.csv"
-printf '%s\n' 'scenario,batch_size,implementation,repetition,wall_s,docs_per_s,first_s,peak_rss_mib,end_rss_mib,cpu_s,heap_mib' > "$metrics"
+printf '%s\n' 'scenario,batch_size,implementation,repetition,input_docs,output_records,wall_s,docs_per_s,first_s,peak_rss_mib,end_rss_mib,cpu_s,heap_mib' > "$metrics"
 
 kafka_bin=/opt/bitnami/kafka/bin
 kafka() {
@@ -111,15 +115,15 @@ configure_worker() {
 # initializes the group so resetting its offset to zero is deterministic;
 # without this, Java/Go both default new groups to the high watermark.
 prepare_backlog() {
-  local input=$1 output=$2 group=$3
+  local input=$1 output=$2 group=$3 input_docs=$4
   topic_create "$input"
   topic_create "$output"
   kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_FIXTURE_PRODUCER_POD" -- sh -c \
-    "timeout 180s $kafka_bin/kafka-console-producer.sh --bootstrap-server my-kafka.kafka.svc.cluster.local:9092 --topic '$input' < /tmp/test_data.json"
+    "head -n '$input_docs' /tmp/test_data.json | timeout 180s $kafka_bin/kafka-console-producer.sh --bootstrap-server my-kafka.kafka.svc.cluster.local:9092 --topic '$input'"
   local input_offset
   input_offset=$(topic_offset "$input")
-  [[ "$input_offset" == "$FIXTURE_RECORDS" ]] || {
-    echo "$input: $input_offset input records instead of $FIXTURE_RECORDS" >&2; return 1;
+  [[ "$input_offset" == "$input_docs" ]] || {
+    echo "$input: $input_offset input records instead of $input_docs" >&2; return 1;
   }
   [[ "$(topic_offset "$output")" == "0" ]] || { echo "nonempty output topic $output" >&2; return 1; }
 
@@ -133,7 +137,7 @@ prepare_backlog() {
       --reset-offsets --to-earliest --execute 2>&1) || true
     offset=$(group_offset "$group" "$input" || true)
     if [[ "$offset" == "0" ]]; then
-      printf 'Prepared %s group %s at committed offset 0, backlog %s\n' "$input" "$group" "$FIXTURE_RECORDS"
+      printf 'Prepared %s group %s at committed offset 0, backlog %s\n' "$input" "$group" "$input_docs"
       return 0
     fi
     sleep 3
@@ -153,8 +157,9 @@ worker_restarts() {
 # before starting the worker; kubectl rollout status alone would miss the
 # earliest output when the backlog is already present.
 monitor_output() {
-  local output=$1 result_file=$2 deadline=$((SECONDS + TIMEOUT_SECONDS))
-  local n first=0 current_ms restarts
+  local input=$1 group=$2 input_docs=$3 output=$4 result_file=$5 expected_output=$6
+  local deadline=$((SECONDS + TIMEOUT_SECONDS))
+  local n first=0 current_ms restarts committed
   while (( SECONDS < deadline )); do
     n=$(topic_offset "$output" || echo 0)
     current_ms=$(date +%s%3N)
@@ -167,17 +172,32 @@ monitor_output() {
     if (( n > 0 && first == 0 )); then
       first=$current_ms
     fi
-    if (( n > EXPECTED_RECORDS )); then
-      echo "Unexpected duplicate output for $output: $n > $EXPECTED_RECORDS" >&2
-      return 1
-    fi
-    if (( n == EXPECTED_RECORDS )); then
-      printf '%s %s\n' "$first" "$current_ms" > "$result_file"
-      return 0
+    if (( expected_output > 0 )); then
+      if (( n > expected_output )); then
+        echo "Unexpected output for $output: $n > $expected_output" >&2
+        return 1
+      fi
+      if (( n == expected_output )); then
+        printf '%s %s %s\n' "$first" "$current_ms" "$n" > "$result_file"
+        return 0
+      fi
+    else
+      # For the 1000-document small-batch fixture the exact output count is
+      # learned from Java, then compared with Go. A committed input offset
+      # means the worker has already delivered its corresponding output.
+      committed=$(group_offset "$group" "$input" || true)
+      if [[ "$committed" == "$input_docs" ]]; then
+        if (( n == 0 )); then
+          echo "No output records for $output; choose a representative fixture" >&2
+          return 1
+        fi
+        printf '%s %s %s\n' "$first" "$current_ms" "$n" > "$result_file"
+        return 0
+      fi
     fi
     sleep 1
   done
-  echo "Timeout on $output, final offset $n (wanted $EXPECTED_RECORDS)" >&2
+  echo "Timeout on $output, output=$n (expected=$expected_output), committed=${committed:-unknown}/$input_docs" >&2
   return 1
 }
 
@@ -202,17 +222,23 @@ run_worker() {
   # Kafka topics and consumer groups are ASCII, unique for every run.
   echo "=== full-worker benchmark: $scenario / max_batch=$batch / rep=$rep / $implementation ==="
 
+  local input_docs="$FIXTURE_RECORDS" expected_output="$EXPECTED_RECORDS"
+  if [[ "$batch" == "2" ]]; then
+    input_docs="$BENCH_SMALL_INPUT_DOCS"
+    expected_output=0
+  fi
   scale_down
-  prepare_backlog "$input" "$output" "$group"
+  prepare_backlog "$input" "$output" "$group" "$input_docs"
   configure_worker "$implementation" "$input" "$output" "$group" "$batch" "$scenario"
   local times_file="$artifact_dir/$tag.times"
-  monitor_output "$output" "$times_file" &
+  monitor_output "$input" "$group" "$input_docs" "$output" "$times_file" "$expected_output" &
   local monitor_pid=$!
   kubectl -n "$APP_NAMESPACE" scale "statefulset/$PIPELINE" --replicas=1
   kubectl -n "$APP_NAMESPACE" rollout status "statefulset/$PIPELINE" --timeout="${TIMEOUT_SECONDS}s"
   wait "$monitor_pid"
-  local first_ms end_ms started_iso started_ms completed_offset
-  read -r first_ms end_ms < "$times_file"
+  local first_ms end_ms output_count started_iso started_ms completed_offset
+  read -r first_ms end_ms output_count < "$times_file"
+  [[ "$output_count" =~ ^[1-9][0-9]*$ ]] || { echo "invalid output count $output_count" >&2; return 1; }
   started_iso=$(kubectl -n "$APP_NAMESPACE" get "pod/$PIPELINE-0" -o json |
     jq -er --arg worker "$worker_name" '.status.containerStatuses[] |
       select(.name == $worker) | .state.running.startedAt')
@@ -230,42 +256,42 @@ PY
   local attempt
   for attempt in $(seq 1 30); do
     completed_offset=$(group_offset "$group" "$input" || true)
-    [[ "$completed_offset" == "$FIXTURE_RECORDS" ]] && break
+    [[ "$completed_offset" == "$input_docs" ]] && break
     sleep 2
   done
-  [[ "$completed_offset" == "$FIXTURE_RECORDS" ]] || {
-    echo "$group committed $completed_offset instead of $FIXTURE_RECORDS" >&2; return 1;
+  [[ "$completed_offset" == "$input_docs" ]] || {
+    echo "$group committed $completed_offset instead of $input_docs" >&2; return 1;
   }
 
   read_memory
   local output_file="$artifact_dir/$scenario-$batch-$rep-$implementation.jsonl"
   timeout 150s kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- \
     "$kafka_bin/kafka-console-consumer.sh" --bootstrap-server localhost:9092 \
-    --topic "$output" --partition 0 --offset earliest --max-messages "$EXPECTED_RECORDS" \
+    --topic "$output" --partition 0 --offset earliest --max-messages "$output_count" \
     --timeout-ms 90000 > "$output_file"
-  [[ "$(wc -l < "$output_file")" == "$EXPECTED_RECORDS" ]] || {
+  [[ "$(wc -l < "$output_file")" == "$output_count" ]] || {
     echo "$output: captured wrong number of output messages" >&2; return 1;
   }
   python3 - "$metrics" "$scenario" "$batch" "$implementation" "$rep" \
-    "$FIXTURE_RECORDS" "$started_ms" "$first_ms" "$end_ms" \
+    "$input_docs" "$output_count" "$started_ms" "$first_ms" "$end_ms" \
     "$peak_rss_kb" "$end_rss_kb" "$cpu_usec" "$heap_bytes" <<'PY'
 import csv
 import sys
-(path, scenario, batch, implementation, rep, docs, started, first, end,
+(path, scenario, batch, implementation, rep, docs, output_count, started, first, end,
  peak, rss, cpu, heap) = sys.argv[1:]
 elapsed = (int(end)-int(started))/1000
 if elapsed <= 0:
     raise SystemExit("invalid elapsed time")
 with open(path, "a", newline="", encoding="utf-8") as stream:
     csv.writer(stream).writerow([
-        scenario, batch, implementation, rep, f"{elapsed:.3f}",
+        scenario, batch, implementation, rep, docs, output_count, f"{elapsed:.3f}",
         f"{int(docs)/elapsed:.2f}", f"{(int(first)-int(started))/1000:.3f}",
         f"{int(peak)/1024:.2f}", f"{int(rss)/1024:.2f}",
         f"{int(cpu)/1_000_000:.3f}" if cpu.isdigit() else "",
         f"{float(heap)/1048576:.2f}" if heap and heap.lower() != "nan" else "",
     ])
 PY
-  echo "Completed $tag: wall=$((end_ms-started_ms)) ms, output=$EXPECTED_RECORDS, peakRSS=$peak_rss_kb KiB"
+  echo "Completed $tag: wall=$((end_ms-started_ms)) ms, input=$input_docs, output=$output_count, peakRSS=$peak_rss_kb KiB"
 }
 
 case "$BENCH_SCENARIOS" in
@@ -285,10 +311,13 @@ for scenario in "${scenarios[@]}"; do
       for implementation in "${implementations[@]}"; do
         run_worker "$scenario" "$batch" "$rep" "$implementation"
       done
+      # Java determines the small-fixture output count; exact multiset parity
+      # is still required when the Go run comes first on even repetitions.
+      expected_output=$(awk '{print $3}' "$artifact_dir/${base_run_id}-$scenario-$batch-$rep-java.times")
       python3 .github/scripts/k8s/compare-full-worker-output.py \
         --java "$artifact_dir/$scenario-$batch-$rep-java.jsonl" \
         --go "$artifact_dir/$scenario-$batch-$rep-go.jsonl" \
-        --expected "$EXPECTED_RECORDS" --scenario "$scenario/$batch/$rep" \
+        --expected "$expected_output" --scenario "$scenario/$batch/$rep" \
         --report "$artifact_dir/$scenario-$batch-$rep-comparison.json"
       # The output multiset digest is retained, but full Kafka payloads are not
       # uploaded with the benchmark artifact.

@@ -11,18 +11,18 @@ Only one implementation runs at a time. The benchmark scales the same Kubernetes
 
 Both implementations use the same worker resource limits (1 CPU, 1 GiB), output mode `0011`, Manticore/PQ data, topic partition count (1), and identical Kafka fixture. The Java command uses `-XX:MaxRAMPercentage=60.0` so the JVM can use up to about 614 MiB of heap within the unchanged 1 GiB container memory limit. With the default container-aware JVM heap limit (~25%), the original Java implementation crashed with `OutOfMemoryError` inside the `lowerPHP()` string-reading path on a large batch. This setting changes the **benchmark JVM heap ceiling only**, not Java source code or the worker container limits; the remaining memory is needed for native allocations and the PHP child process. It should be reported when comparing memory consumption.
 
-The Kafka group is initialized and reset to offset zero before starting the worker, so the complete backlog is present at startup. All 43,403 public input documents must be committed, and exactly 9,418 output messages must be produced.
+The Kafka group is initialized and reset to offset zero before starting the worker, so the complete backlog is present at startup. For max batch 5,000, all 43,403 public input documents must be committed and exactly 9,418 output messages produced. For max batch 2, the test uses the **first 1,000 public fixture documents** (configurable by `BENCH_SMALL_INPUT_DOCS`) to keep 24 full worker runs within a bounded CI time. The expected output count for that smaller workload is learned from the original Java worker, then Go must produce an identical JSON multiset. Thus **do not directly compare absolute throughput across batch sizes**: the two batch sizes have different input workloads.
 
 ## Scenarios
 
-The smoke benchmark on the PR uses one Java/Go pair at max batch size 5,000, both with and without JSLT. The opt-in full benchmark uses **three alternating-order pairs per case**:
+The smoke benchmark on PR updates uses one Java/Go pair at max batch size 5,000, both with and without JSLT. Applying the `benchmark-full-workers` PR label triggers **three alternating-order pairs per case**:
 
-| Case | Max batch size | JSLT |
-| --- | ---: | --- |
-| Large batch / mapping only | 5,000 | No |
-| Large batch / JSLT | 5,000 | Yes |
-| Small batch / mapping only | 2 (initial batch size 1) | No |
-| Small batch / JSLT | 2 (initial batch size 1) | Yes |
+| Case | Max batch size | Input docs | JSLT |
+| --- | ---: | ---: | --- |
+| Large batch / mapping only | 5,000 | 43,403 | No |
+| Large batch / JSLT | 5,000 | 43,403 | Yes |
+| Small batch / mapping only | 2 (initial batch size 1) | 1,000 | No |
+| Small batch / JSLT | 2 (initial batch size 1) | 1,000 | Yes |
 
 The JSLT uses **synthetic** `replace()` and `parse-url()` transformations over the E2E output; no real customer expression or Kafka document is committed.
 
@@ -43,6 +43,6 @@ Output is `artifacts/full-worker-benchmark/measurements.csv`, `summary.md` and o
 
 ## Running
 
-The workflow `.github/workflows/full-worker-benchmark.yml` is deliberately separate from the normal CI. It runs once on PR changes to its implementation files, with one repetition and the large-batch modes. For a full manual run, use its `workflow_dispatch` inputs (`repetitions=3`, `batch_sizes='2 5000'`, `scenarios=all`) once the workflow is available on the default branch. During the WIP PR, changing the benchmark workflow/scripts triggers a new smoke run; an existing `benchmark-full-workers` PR label can also trigger it.
+The workflow `.github/workflows/full-worker-benchmark.yml` is deliberately separate from the normal CI. It runs once on PR changes to its implementation files, with one repetition and the large-batch modes. For a full manual run, use its `workflow_dispatch` inputs (`repetitions=3`, `batch_sizes='2 5000'`, `scenarios=all`) once the workflow is available on the default branch. During the WIP PR, changing the benchmark workflow/scripts triggers a new smoke run. To run all four cases three times without merging the PR, add the `benchmark-full-workers` label to the PR. This is an expensive job (12 Java/Go pairs, 24 worker runs); subsequent PR pushes cancel it. The smaller-input case still checks committed offsets and full output parity, not only throughput.
 
 Do **not** promote the JVM-free image to the default, merge the PR or claim production parity based on these measurements alone. Cross-check actual outputs, available memory headroom and customer JSLT compatibility.
