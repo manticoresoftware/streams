@@ -824,6 +824,9 @@ func TestStrictNativeMalformedDocuments(t *testing.T) {
 			{" \t \n", mode[2] == '1'},
 			{`{"title":1,}`, mode[2] == '1'},
 			{`{"items":[1,]}`, false},
+			{`{"title":"ok",}`, mode[2] == '1'},
+			{"NaN", mode[2] == '1'},
+			{"Infinity", mode[2] == '1'},
 			{`{'title':'ok'}`, mode[2] == '1'},
 			{`{"title":"ok"} trailing`, mode[2] == '1'},
 			{`42`, mode[2] == '1'},
@@ -840,6 +843,72 @@ func TestStrictNativeMalformedDocuments(t *testing.T) {
 				}
 				if m.reference.cmd != nil || m.referenceCalls.Load() != 0 {
 					t.Fatal("native-only mapping launched Java")
+				}
+			})
+		}
+	}
+}
+
+// Compare Go's native behavior with the original Java JsonTransformer for
+// non-object roots, malformed/lenient JSON and whole_document mappings. Both
+// mapped/PQ input and Kafka output must match, including Java errors.
+func TestLegacyJSONRootParity(t *testing.T) {
+	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
+		t.Skip("requires the original Java worker JAR")
+	}
+	rulesets := []struct {
+		name string
+		rules []string
+		fields map[string]string
+	}{
+		{"ordinary", []string{"title => selected"}, map[string]string{"selected":"text"}},
+		{"whole document", []string{"whole_document => json"}, map[string]string{"json":"json"}},
+	}
+	documents := []struct{ name, raw string }{
+		{"string root", `"hello"`}, {"number root", `42`},
+		{"float root", `2.5e1`}, {"array root", `[1,2]`},
+		{"boolean root", `true`}, {"null root", `null`},
+		{"empty document", ""}, {"whitespace", " \t "},
+		{"valid object", `{"title":"ok"}`},
+		{"trailing array comma", `{"items":[1,]}`},
+		{"trailing object comma", `{"title":"ok",}`},
+		{"single quoted object", `{'title':'ok'}`},
+		{"invalid suffix", `{"title":"ok"} junk`},
+		{"truncated", `{"title":`},
+		{"NaN", "NaN"}, {"Infinity", "Infinity"},
+	}
+	for _, ruleset := range rulesets {
+		for _, mode := range []string{"1000", "0100", "1010", "0010", "0011"} {
+			t.Run(ruleset.name+"/"+mode, func(t *testing.T) {
+				m := newMapper(ruleset.rules, ruleset.fields, mode)
+				defer m.reference.close()
+				for _, document := range documents {
+					t.Run(document.name,func(t *testing.T) {
+						count := m.referenceCalls.Load()
+						gotMapped,gotOutput,gotErr := m.transform(document.raw)
+						if m.referenceCalls.Load() != count {
+							t.Fatal("native mapper called Java for input shape")
+						}
+						wantMapped,wantOutput,javaErr := m.referenceMap(document.raw)
+						if (gotErr != nil) != (javaErr != nil) {
+							t.Fatalf("Go error %v; Java error %v", gotErr,javaErr)
+						}
+						if gotErr != nil { return }
+						gb,err := json.Marshal(gotMapped)
+						if err != nil { t.Fatal(err) }
+						wb,err := json.Marshal(wantMapped)
+						if err != nil { t.Fatal(err) }
+						if !sameFixtureJSON(string(gb),string(wb)) {
+							t.Fatalf("mapped mismatch: Go=%s Java=%s",gb,wb)
+						}
+						if json.Valid([]byte(gotOutput)) && json.Valid([]byte(wantOutput)) {
+							if !sameFixtureJSON(gotOutput,wantOutput) {
+								t.Fatalf("output mismatch: Go=%q Java=%q",gotOutput,wantOutput)
+							}
+						} else if gotOutput != wantOutput {
+							t.Fatalf("nonstandard output mismatch: Go=%q Java=%q",gotOutput,wantOutput)
+						}
+					})
 				}
 			})
 		}

@@ -521,6 +521,18 @@ func (m *mapper) transform(raw string) (any, string, error) {
 		for _, path := range rule.paths {
 			keys := path.keys
 			if len(keys) == 1 && keys[0] == "whole_document" {
+				// Whole-document uses JsonIterator, which rejects malformed
+				// input even when Jayway accepts lenient JSONPath syntax.
+				// A JSON prefix with a junk suffix (or whitespace-only input)
+				// instead aborts the mapping loop with its partial results.
+				if !json.Valid([]byte(originalInput)) {
+					trimmed := strings.TrimSpace(originalInput)
+					if trimmed == "" || (strings.HasPrefix(trimmed, strings.TrimSpace(raw)) &&
+						trimmed != strings.TrimSpace(raw)) {
+						return m.abortMapping(originalOutput, mapped, out)
+					}
+					return nil, "", fmt.Errorf("legacy whole_document cannot serialize malformed JSON")
+				}
 				// The legacy whole_document rule maps any valid JSON root,
 				// including strings, numbers and arrays (not just objects).
 				mapped[rule.target] = sourceRoot
@@ -559,7 +571,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 					// mapping loop before any subsequent mapping rules.
 					return m.abortMapping(originalOutput, mapped, out)
 				}
-				if strings.Contains(resolved, "..") ||
+				if strings.Contains(resolved, "..") || dynamicSelectorIsUnion(key) ||
 					(!strings.Contains(resolved, "[*]") && javaCollectionSelector.MatchString(resolved)) {
 					// Jayway returns a JSONArray, which the legacy mapper
 					// catches as a ClassCastException for non-[*] rules.

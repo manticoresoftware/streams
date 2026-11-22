@@ -105,11 +105,14 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 		}
 		return map[string]any{}, map[string]any{}, "{}", nil
 	}
-	// JSON-smart and JsonIterator both accept trailing commas in *arrays*,
-	// including in passthrough and rename mode. Keep the original raw text
-	// for passthrough Kafka output, while mapping and JSONPath use the
-	// normalized syntax.
-	if repaired, changed := stripTrailingArrayCommas(raw); changed {
+	// JSON-smart accepts trailing commas in arrays and objects. JsonIterator
+	// accepts the array form in passthrough/rename mode but rejects a trailing
+	// object-property comma. Keep the original raw Kafka output where Java
+	// preserves it, while evaluating JSONPath against normalized JSON.
+	if repaired, arrayComma, objectComma := stripLegacyTrailingCommas(raw); arrayComma || objectComma {
+		if mode[2] == '1' && objectComma {
+			return fail()
+		}
 		if root, valid := parse(repaired); valid {
 			if doc, isObject := root.(map[string]any); isObject {
 				return doc, root, repaired, nil
@@ -119,6 +122,9 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 	if mode[2] == '1' {
 		return fail()
 	}
+	if trimmed == "NaN" || trimmed == "Infinity" || trimmed == "-Infinity" || trimmed == "undefined" {
+		return map[string]any{}, map[string]any{}, "{}", nil
+	}
 	// JSON-smart accepts single-quoted strings. JsonIterator, used by the
 	// whole_document mapping, does not accept the original invalid JSON.
 	if single, ok := normalizeSingleQuotedJSON(raw); ok {
@@ -127,11 +133,6 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 				return doc, root, single, nil
 			}
 		}
-	}
-	// A trailing comma after an object property aborts Jayway's parse in
-	// new-only and original-field mode, leaving an empty mapping.
-	if strings.Contains(raw, ",}") {
-		return map[string]any{}, map[string]any{}, "{}", nil
 	}
 	// Jayway can read the first complete JSON value even when the input
 	// contains an invalid suffix; JsonIterator cannot, hence the earlier
@@ -207,12 +208,12 @@ func normalizeSingleQuotedJSON(raw string) (string, bool) {
 	return out.String(), true
 }
 
-// Remove commas immediately before array closing brackets, while preserving
-// quoted JSON strings and their escape sequences. Object trailing commas
-// follow a different Java parser path and are deliberately not accepted here.
-func stripTrailingArrayCommas(raw string) (string, bool) {
+// Remove trailing commas outside quoted JSON strings, remembering whether
+// they followed array entries or object properties: the legacy parsers treat
+// these forms differently in passthrough mode.
+func stripLegacyTrailingCommas(raw string) (string, bool, bool) {
 	var result strings.Builder
-	inString, escaped, changed := false, false, false
+	inString, escaped, arrayChanged, objectChanged := false, false, false
 	for i := 0; i < len(raw); i++ {
 		c := raw[i]
 		if inString {
@@ -236,12 +237,18 @@ func stripTrailingArrayCommas(raw string) (string, bool) {
 			for j < len(raw) && (raw[j] == ' ' || raw[j] == '\n' || raw[j] == '\t' || raw[j] == '\r') {
 				j++
 			}
-			if j < len(raw) && raw[j] == ']' {
-				changed = true
-				continue
+			if j < len(raw) {
+				if raw[j] == ']' {
+					arrayChanged = true
+					continue
+				}
+				if raw[j] == '}' {
+					objectChanged = true
+					continue
+				}
 			}
 		}
 		result.WriteByte(c)
 	}
-	return result.String(), changed
+	return result.String(), arrayChanged, objectChanged
 }
