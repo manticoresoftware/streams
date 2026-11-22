@@ -74,7 +74,7 @@ configure_worker() {
       .image = $image |
       .imagePullPolicy = "IfNotPresent" |
       (if $implementation == "java"
-       then .command = ["java", "-cp", "/KafkaHandler.jar", "manticore.Main"] | .args = []
+       then .command = ["java", "-XX:MaxRAMPercentage=60.0", "-cp", "/KafkaHandler.jar", "manticore.Main"] | .args = []
        else del(.command) | del(.args) end) |
       .readinessProbe.httpGet.path = $probe |
       .livenessProbe.httpGet.path = $probe |

@@ -9,7 +9,9 @@ This is an opt-in, **full Kafka → JSON mapping → Manticore CALL PQ → optio
 
 Only one implementation runs at a time. The benchmark scales the same Kubernetes StatefulSet to zero, replaces its worker image/command and input/output topic environment, then scales it to one. The co-located Manticore and its persistent PQ table remain the same. Each run uses a **fresh Kafka input topic, output topic and consumer group**.
 
-Both implementations use the same worker resource limits (1 CPU, 1 GiB), output mode `0011`, Manticore/PQ data, topic partition count (1), and identical Kafka fixture. The Kafka group is initialized and reset to offset zero before starting the worker, so the complete backlog is present at startup. All 43,403 public input documents must be committed, and exactly 9,418 output messages must be produced.
+Both implementations use the same worker resource limits (1 CPU, 1 GiB), output mode `0011`, Manticore/PQ data, topic partition count (1), and identical Kafka fixture. The Java command uses `-XX:MaxRAMPercentage=60.0` so the JVM can use up to about 614 MiB of heap within the unchanged 1 GiB container memory limit. With the default container-aware JVM heap limit (~25%), the original Java implementation crashed with `OutOfMemoryError` inside the `lowerPHP()` string-reading path on a large batch. This setting changes the **benchmark JVM heap ceiling only**, not Java source code or the worker container limits; the remaining memory is needed for native allocations and the PHP child process. It should be reported when comparing memory consumption.
+
+The Kafka group is initialized and reset to offset zero before starting the worker, so the complete backlog is present at startup. All 43,403 public input documents must be committed, and exactly 9,418 output messages must be produced.
 
 ## Scenarios
 
