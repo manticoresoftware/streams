@@ -12,7 +12,7 @@ func TestLegacyJSONPathParity(t *testing.T) {
     if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
         t.Skip("requires compiled original Java mapper")
     }
-    raw := `{"before":"first","after":"last","items":[{"name":"Ann","active":true},{"name":"Bob","active":false}],"groups":{"one":{"name":"N","active":true}},"name":"root","kind":"foo","id":"bar","user":{"foo":{"bar":{"name":"nested"}}},"user.name":"Dot","a, b":"Comma","user...name":"Dots","odd[(@key":"Odd","foo[*]":"literal"}
+    raw := `{"before":"first","after":"last","items":[{"name":"Ann","active":true},{"name":"Bob","active":false}],"groups":{"one":{"name":"N","active":true}},"name":"root","kind":"foo","id":"bar","user":{"foo":{"bar":{"name":"nested"}}},"user.name":"Dot","a, b":"Comma","user...name":"Dots","odd[(@key":"Odd","foo[*]":"literal"}`
     cases := []struct{ name, path string }{
         {"malformed-triple-descendant", "items...name"},
         {"root-dollar", "$.name"},
