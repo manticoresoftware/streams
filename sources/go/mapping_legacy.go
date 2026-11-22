@@ -100,7 +100,7 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 	}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		if raw == "" {
+		if raw == "" || mode[2] == '1' {
 			return fail()
 		}
 		return map[string]any{}, map[string]any{}, "{}", nil
