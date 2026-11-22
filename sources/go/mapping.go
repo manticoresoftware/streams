@@ -30,6 +30,8 @@ type mappingPath struct {
 	multi bool
 	indefiniteAsScalar bool
 	rawWildcardSteps []rawWildcardStep
+	abortOnRead bool
+	lengthFunction bool
 	urlCollectionPrefix []string
 	urlCollectionArrayOnly bool
 	keys        []string
@@ -98,7 +100,9 @@ func compileMappingPath(text string) (mappingPath, bool) {
 			k = strings.TrimSuffix(k, "[*]")
 			p.keys[i], p.wildcard = k, i
 		}
-		if !nativeDynamicPathSegment(k) && !(k == "{}" && p.placeholder != "") {
+		if !nativeDynamicPathSegment(k) && !(k == "{}" && p.placeholder != "") &&
+			!(p.placeholder != "" && strings.HasPrefix(k, "{") && strings.HasSuffix(k, "}") &&
+				nativeDynamicPathSegment(k[1:len(k)-1])) {
 			return p, false
 		}
 	}
@@ -204,12 +208,22 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		_, hasType := fields[target]
 		r := mappingRule{target: target, isURL: fields[target] == "url", hasType: hasType}
 		for _, input := range strings.Split(strings.TrimSpace(parts[0]), "&&") {
+
 			p, ok := compileMappingPath(input)
+			if !ok && (strings.Contains(input, "...") || strings.Contains(input, "[(@")) {
+				// Java throws at runtime, retaining fields mapped before this path.
+				p.abortOnRead, ok = true, true
+			}
+			if !ok && !strings.ContainsAny(input, "{}") && strings.HasSuffix(input, ".length()") {
+				// Jayway returns an Integer for array length and null for
+				// string length. Both have legacy, type-sensitive String casts.
+				prefix := strings.TrimSuffix(input, ".length()")
+				if expr, err := jp.ParseString("$." + prefix); err == nil {
+					p.advanced, p.lengthFunction, ok = expr, true, true
+				}
+			}
 			if !ok && !strings.ContainsAny(input, "{}") &&
-				!strings.Contains(input, "..") &&
 				(fields[target] != "url" || (!strings.Contains(input, "[*]") && !strings.Contains(input, "[?("))) {
-				// Evaluate advanced paths in Go, preserving the mapping rules as
-				// configured in the Java worker (relative paths use $. prefix).
 				path := strings.TrimSpace(input)
 				if strings.HasPrefix(path, "[") {
 					path = "$" + path
@@ -218,8 +232,23 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 				}
 				if expression, err := jp.ParseString(path); err == nil {
 					p.advanced, p.multi, ok = expression, strings.Contains(input, "[*]"), true
-					p.indefiniteAsScalar = !p.multi && javaCollectionSelector.MatchString(input)
+					// The old worker only joins collections for literal [*].
+					// Other indefinite paths cannot be cast from JSONArray to String.
+					p.indefiniteAsScalar = !p.multi && (javaCollectionSelector.MatchString(input) ||
+						strings.Contains(input, "..") || strings.Contains(input, ".*") ||
+						strings.Contains(input, "[?(") || strings.Contains(input, ", ") ||
+						strings.Contains(input, "','"))
 				}
+			}
+			if !ok && !strings.Contains(input, "[*]") &&
+				strings.Contains(input, "[?(") && strings.Contains(input, "=~ /") &&
+				strings.Contains(input, ")]") {
+				// Jayway regex filters also return JSONArray for text mappings.
+				p.indefiniteAsScalar, ok = true, true
+			}
+			if !ok && strings.HasPrefix(input, "$.") {
+				// Java prepends "$." even when the configured rule has "$.".
+				p.keys, ok = strings.Split(input, "."), true
 			}
 			if !r.isURL && p.advanced != nil && p.multi {
 				if steps, supported := compileRawWildcardSteps(input); supported {
@@ -519,6 +548,9 @@ func (m *mapper) transform(raw string) (any, string, error) {
 		last := []string{""}
 		var value string
 		for _, path := range rule.paths {
+			if path.abortOnRead {
+				return m.abortMapping(originalOutput, mapped, out)
+			}
 			keys := path.keys
 			if len(keys) == 1 && keys[0] == "whole_document" {
 				// Whole-document uses JsonIterator, which rejects malformed
@@ -662,6 +694,14 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			if path.indefiniteAsScalar {
 				// Jayway produces an array that Java cannot assign to String.
 				text, found, compatible = "", false, true
+			} else if path.lengthFunction {
+				values := path.advanced.Get(doc)
+				text, found, compatible = "", false, true
+				if len(values) == 1 {
+					if _, isString := values[0].(string); isString {
+						text, found = "null", true
+					}
+				}
 			} else if len(path.rawWildcardSteps) > 0 {
 				text, found, compatible = selectRawNestedWildcards(raw, path.rawWildcardSteps)
 			} else if path.advanced != nil {

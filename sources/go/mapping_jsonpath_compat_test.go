@@ -6,10 +6,9 @@ import (
     "testing"
 )
 
-// Characterize nontrivial legacy Jayway paths before migrating their behavior.
-// Run this probe against the real Java mapper; replace with assertions once
-// native semantics are implemented.
-func TestLegacyJSONPathCharacterization(t *testing.T) {
+// Java differential regression for extended JSONPath, including malformed
+// rules, recursive wildcards, filters, functions and original/rename modes.
+func TestLegacyJSONPathParity(t *testing.T) {
     if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
         t.Skip("requires compiled original Java mapper")
     }
@@ -43,13 +42,20 @@ func TestLegacyJSONPathCharacterization(t *testing.T) {
                 m := newMapper([]string{"before => before", tc.path+" => selected", "after => after"},
                    map[string]string{"before":"text","selected":"text","after":"text"}, mode)
                 defer m.reference.close()
-                mapped, out, err := m.referenceMap(raw)
-                if err != nil {
-                    t.Logf("JAVA ERROR: path=%q: %v",tc.path,err)
-                    return
+                if m.needsReference { t.Fatalf("path %q still requires Java at startup", tc.path) }
+                mapped, out, err := m.transform(raw)
+                if m.referenceCalls.Load() != 0 { t.Fatalf("path %q fell back to Java", tc.path) }
+                wantMapped, wantOutput, javaErr := m.referenceMap(raw)
+                if (err != nil) != (javaErr != nil) {
+                    t.Fatalf("Go err=%v, Java err=%v", err, javaErr)
                 }
-                encoded, _ := json.Marshal(mapped)
-                t.Logf("path=%q: mapped=%s, output=%s",tc.path,encoded,out)
+                if err != nil { return }
+                encoded, e1 := json.Marshal(mapped)
+                reference, e2 := json.Marshal(wantMapped)
+                if e1 != nil || e2 != nil { t.Fatalf("encode mapped: %v / %v",e1,e2) }
+                if !sameFixtureJSON(string(encoded), string(reference)) || !sameFixtureJSON(out, wantOutput) {
+                    t.Fatalf("path=%q: Go mapped=%s out=%q; Java mapped=%s out=%q", tc.path, encoded,out,reference,wantOutput)
+                }
             })
         }
     }

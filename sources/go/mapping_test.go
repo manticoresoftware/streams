@@ -220,8 +220,13 @@ func TestJavaBridgeUnicodeProtocol(t *testing.T) {
 func TestStrictNativeMapper(t *testing.T) {
 	t.Setenv("STREAMS_NATIVE_ONLY", "1")
 	unsupported := newMapper([]string{"items...name => selected"}, map[string]string{"selected": "text"}, "1000")
-	if err := unsupported.requireNativeSupport(); err == nil || !strings.Contains(err.Error(), "hybrid worker") {
-		t.Fatalf("unsupported JSONPath was not rejected at startup: %v", err)
+	if err := unsupported.requireNativeSupport(); err != nil {
+		t.Fatalf("invalid JSONPath should follow Java partial-mapping behavior natively: %v", err)
+	}
+	if _, output, err := unsupported.transform(`{"items":[{"name":"ok"}]}`); err != nil {
+		t.Fatal(err)
+	} else {
+		assertSameJSON(t, output, `{}`)
 	}
 	defer unsupported.reference.close()
 	if unsupported.reference.cmd != nil {
