@@ -87,3 +87,20 @@ func TestKafkaFetchSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestKafkaPollCapacityMatchesJavaBatchGrowth(t *testing.T) {
+	for _, tc := range []struct {
+		maxPoll, maxBatch, pending, want int
+	}{
+		{2, 2, 0, 2}, // Java fetches 2 despite the initial target of 1.
+		{2, 2, 1, 1},
+		{500, 5000, 0, 500},
+		{500, 5000, 2499, 500},
+		{500, 5000, 4999, 1},
+	} {
+		if got := kafkaPollCapacity(tc.maxPoll, tc.maxBatch, tc.pending); got != tc.want {
+			t.Errorf("poll capacity (maxPoll=%d, maxBatch=%d, pending=%d) = %d; want %d",
+				tc.maxPoll, tc.maxBatch, tc.pending, got, tc.want)
+		}
+	}
+}

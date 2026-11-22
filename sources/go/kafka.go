@@ -205,6 +205,16 @@ func runWorker(ctx context.Context, c config, m *metrics) error {
 	return consumeBatches(ctx, c, m, consumer, owned, p)
 }
 
+// Java's Kafka consumer fetches up to max.poll.records on each poll and
+// raises the active processing batch size when that poll contains more records
+// than the current target. The Go consumer must not constrain PollRecords to
+// the *initial* half-max target: for MAX_BATCH_SIZE=2 this would otherwise
+// force singleton PQ queries while Java consistently makes two-document PQ
+// calls. Always cap at the configured hard maximum to avoid oversized batches.
+func kafkaPollCapacity(maxPollRecords, maxBatchSize, pending int) int {
+	return min(maxPollRecords, maxBatchSize-pending)
+}
+
 func consumeBatches(ctx context.Context, c config, m *metrics, consumer *kgo.Client, owned *partitions, p *batchProcessor) error {
 	size := c.batchSize
 	var pending []*kgo.Record
@@ -253,7 +263,7 @@ func consumeBatches(ctx context.Context, c config, m *metrics, consumer *kgo.Cli
 		}
 		pollCtx, cancel := context.WithDeadline(ctx, pollUntil)
 		start := time.Now()
-		fetched := consumer.PollRecords(pollCtx, min(c.maxPollRecords, size-len(pending)))
+		fetched := consumer.PollRecords(pollCtx, kafkaPollCapacity(c.maxPollRecords, c.maxBatchSize, len(pending)))
 		cancel()
 		m.observe("consume", time.Since(start))
 		for _, e := range fetched.Errors() {
@@ -263,6 +273,11 @@ func consumeBatches(ctx context.Context, c config, m *metrics, consumer *kgo.Cli
 			return fmt.Errorf("poll %s partition %d: %w", e.Topic, e.Partition, e.Err)
 		}
 		if fetched.NumRecords() > 0 {
+			// Mirror Java Worker.pollAndProcess(): a full poll can grow the
+			// active batch threshold, even before the scaler runs.
+			if fetched.NumRecords() > size {
+				size = min(fetched.NumRecords(), c.maxBatchSize)
+			}
 			lastMessage = time.Now()
 			if len(pending) == 0 {
 				flushAt = lastMessage.Add(10 * time.Second)
