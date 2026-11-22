@@ -172,6 +172,12 @@ func rawMappedText(input json.RawMessage) (string, bool) {
 // Search the raw source for an equivalent subtree, but reject ambiguous
 // matches with different Java string representations rather than guessing.
 func javaWildcardRawText(value any, raw string) (string, bool) {
+	switch node := value.(type) {
+	case *orderedJPObject:
+		return rawMappedText(node.raw)
+	case *orderedJPArray:
+		return rawMappedText(node.raw)
+	}
 	if text, ok := javaWildcardText(value); ok {
 		return text, true
 	}

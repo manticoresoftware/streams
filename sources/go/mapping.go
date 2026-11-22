@@ -562,6 +562,13 @@ func selectAdvancedMappedValue(root map[string]any, path mappingPath, raw string
 		return "", false, true
 	}
 	values := path.advanced.Get(root)
+	if path.multi && advancedNeedsOrderedJP(root, path.advanced) {
+		ordered, ok := decodeOrderedJP(json.RawMessage(raw), 0)
+		if !ok {
+			return "", false, false
+		}
+		values = path.advanced.Get(ordered)
+	}
 	if path.quotedWildcardValue {
 		if len(values) != 1 {
 			return "", false, true
