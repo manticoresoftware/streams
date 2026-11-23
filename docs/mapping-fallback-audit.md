@@ -127,6 +127,9 @@ names followed by the expected digests for output modes `1000`, `0100`,
 document in that mode. The fixture is deliberately checked into Git so the
 Go-only `TestFrozenJavaMappingGolden` can run with `STREAMS_NATIVE_ONLY=1`,
 without any JVM, Java JAR, or Maven installation.
+The original Java transformer ignores the fourth `OUTPUT_DOCS` bit.
+The same 172 frozen Java results now check all eight accepted mode strings
+(344 native assertions); CI additionally compares each mode with live Java.
 
 The original Java-based differential test remains in CI during migration.
 Update the committed fixture **only** after deliberately rerunning the Java
@@ -135,6 +138,24 @@ Go transformation behavior. Never regenerate golden values from the Go
 implementation itself.
 
 ## Observing compatibility in an actual deployment
+
+To inspect **the rules already configured in a running worker container** without
+Kafka input, Java, or production document export, run the worker's read-only
+audit command (the container name follows the pipeline's worker name):
+
+```sh
+kubectl exec -n "$NAMESPACE" "$POD" -c "$WORKER_CONTAINER" -- \
+  /usr/src/myapp/streams-worker --audit-mapping
+```
+
+It prints a single JSON report with `static_native`, `rule_count`,
+`output_mode`, and unsupported rule/path **indices**; it never prints rule
+expressions, field names, or document contents. This command does not connect
+to Kafka or Manticore and does not affect the running worker. A
+`static_native: true` result means only that the rules compile in Go;
+`runtime_parity_known` remains `false` until representative inputs have
+been checked against Java. Repeat the check for each distinct pipeline
+configuration before selecting a JVM-free deployment.
 
 While the hybrid worker is still available, Prometheus exposes
 `worker_mapping_java_fallback_total` with a **fixed** `reason` label. The
