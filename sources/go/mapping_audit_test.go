@@ -130,6 +130,10 @@ func TestMappingFallbackAuditInstrumentation(t *testing.T) {
 	}
 }
 
+// The legacy Java transformer reads only the first three OUTPUT_DOCS bits;
+// the fourth bit must not change mapping or Kafka output semantics.
+var legacyMappingOutputModes = []string{"1000", "0100", "1010", "0010", "1001", "0101", "1011", "0011"}
+
 func syntheticMappingCases() []mappingAuditScenario {
 	return []mappingAuditScenario{
 		{"dotted field", "object", `{"before":"yes","item":{"name":"Ann"},"after":"end"}`, "item.name", "text"},
@@ -189,9 +193,9 @@ func TestMappingFallbackAudit(t *testing.T) {
 		Source: "synthetic-java-vs-go",
 		Totals: mappingAuditTotals{FallbackReason: make(map[string]int)},
 	}
-	golden := mappingGoldenSnapshot{SchemaVersion: 1, Oracle: "streams-legacy-java-2026", Cases: make([]mappingGoldenOutcome, 0, len(cases)*4)}
+	golden := mappingGoldenSnapshot{SchemaVersion: 1, Oracle: "streams-legacy-java-2026", Cases: make([]mappingGoldenOutcome, 0, len(cases)*len(legacyMappingOutputModes))}
 	for _, tc := range cases {
-		for _, mode := range []string{"1000", "0100", "1010", "0010"} {
+		for _, mode := range legacyMappingOutputModes {
 			fields := map[string]string{"before":"text", "selected":tc.fieldType, "after":"text"}
 			rules := []string{"before => before", tc.path+" => selected", "after => after"}
 			m := newMapper(rules, fields, mode)
