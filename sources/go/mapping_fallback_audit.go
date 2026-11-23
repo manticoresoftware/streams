@@ -33,6 +33,13 @@ type mappingFallbackAudit struct {
 	counts        map[mappingFallbackReason]uint64
 	samples       []mappingFallbackIssue
 	compileIssues []mappingFallbackIssue
+	observer func(mappingFallbackReason)
+}
+
+func (a *mappingFallbackAudit) setObserver(observer func(mappingFallbackReason)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.observer = observer
 }
 
 const mappingFallbackSampleLimit = 32
@@ -56,7 +63,6 @@ func (a *mappingFallbackAudit) firstCompileIssue() mappingFallbackIssue {
 
 func (a *mappingFallbackAudit) record(reason mappingFallbackReason, ruleIndex, pathIndex int) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.counts == nil {
 		a.counts = make(map[mappingFallbackReason]uint64)
 	}
@@ -65,6 +71,11 @@ func (a *mappingFallbackAudit) record(reason mappingFallbackReason, ruleIndex, p
 		a.samples = append(a.samples, mappingFallbackIssue{
 			Reason: reason, RuleIndex: ruleIndex, PathIndex: pathIndex,
 		})
+	}
+	observer := a.observer
+	a.mu.Unlock()
+	if observer != nil {
+		observer(reason)
 	}
 }
 

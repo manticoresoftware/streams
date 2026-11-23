@@ -146,6 +146,7 @@ func kafkaFetchOptions(c config) []kgo.Opt {
 
 func runWorker(ctx context.Context, c config, m *metrics) error {
 	mapper := newMapper(c.rules, c.fields, c.output)
+	mapper.fallbackAudit.setObserver(m.recordMappingFallback)
 	if err := mapper.requireNativeSupport(); err != nil {
 		return err
 	}

@@ -133,3 +133,23 @@ Update the committed fixture **only** after deliberately rerunning the Java
 oracle on the synthetic corpus, reviewing the differences, and verifying the
 Go transformation behavior. Never regenerate golden values from the Go
 implementation itself.
+
+## Observing compatibility in an actual deployment
+
+While the hybrid worker is still available, Prometheus exposes
+`worker_mapping_java_fallback_total` with a **fixed** `reason` label. The
+only possible reason values are `unsupported_rule`, `url_compatibility`,
+`value_conversion` and `rename_delete`. Existing pipeline and instance
+labels apply as with other worker metrics; rule text, input documents,
+selected values and per-rule indices are never exposed.
+
+For example, the total fallback volume across running workers is:
+
+```promql
+sum by (reason) (increase(worker_mapping_java_fallback_total[1h]))
+```
+
+A zero value for these counters during a representative hybrid rollout is
+useful evidence, **not proof of universal compatibility**. Combine it with the
+offline configuration audit, the Java differential suite and golden fixtures
+before removing the Java compatibility implementation.
