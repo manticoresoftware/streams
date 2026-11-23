@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +42,47 @@ type mappingAuditReport struct {
 	Totals        mappingAuditTotals   `json:"totals"`
 	Results       []mappingAuditResult `json:"results"`
 }
+
+type mappingGoldenOutcome struct {
+	Scenario string `json:"scenario"`
+	Mode string `json:"mode"`
+	JavaError bool `json:"java_error"`
+	Digest string `json:"digest,omitempty"`
+}
+
+type mappingGoldenSnapshot struct {
+	SchemaVersion int `json:"schema_version"`
+	Oracle string `json:"oracle"`
+	Cases []mappingGoldenOutcome `json:"cases"`
+}
+
+// Canonicalize valid JSON objects for order-independent comparisons; preserve
+// invalid/legacy output verbatim, including empty strings. UseNumber keeps
+// large integers and decimal tokens exact.
+func canonicalGoldenJSON(raw string) string {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if decoder.Decode(&value) != nil {
+		return raw
+	}
+	reencoded, err := json.Marshal(value)
+	if err != nil {
+		return raw
+	}
+	return string(reencoded)
+}
+
+func mappingGoldenDigest(mapped any, output string) (string, error) {
+	encoded, err := json.Marshal(mapped)
+	if err != nil {
+		return "", err
+	}
+	payload := canonicalGoldenJSON(string(encoded)) + "\n" + canonicalGoldenJSON(output)
+	hash := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(hash[:]), nil
+}
+
 
 func TestMappingFallbackAuditInstrumentation(t *testing.T) {
 	t.Setenv("STREAMS_NATIVE_ONLY", "1")
@@ -86,11 +130,8 @@ func TestMappingFallbackAuditInstrumentation(t *testing.T) {
 	}
 }
 
-func TestMappingFallbackAudit(t *testing.T) {
-	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
-		t.Skip("requires original Java mapping implementation as oracle")
-	}
-	cases := []mappingAuditScenario{
+func syntheticMappingCases() []mappingAuditScenario {
+	return []mappingAuditScenario{
 		{"dotted field", "object", `{"before":"yes","item":{"name":"Ann"},"after":"end"}`, "item.name", "text"},
 		{"indexed field", "array", `{"items":[{"name":"Ann"},{"name":"Bob"}]}`, "items[0].name", "text"},
 		{"wildcard strings", "array", `{"items":[{"name":"Ann"},{"name":"Bob"}]}`, "items[*].name", "text"},
@@ -136,11 +177,19 @@ func TestMappingFallbackAudit(t *testing.T) {
 		{"scalar root", "scalar", `42`, "missing", "text"},
 		{"trailing comma", "malformed_json", `{"item":{"name":"Ann"},}`, "item.name", "text"},
 	}
+}
+
+func TestMappingFallbackAudit(t *testing.T) {
+	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
+		t.Skip("requires original Java mapping implementation as oracle")
+	}
+	cases := syntheticMappingCases()
 	report := mappingAuditReport{
 		SchemaVersion: 1,
 		Source: "synthetic-java-vs-go",
 		Totals: mappingAuditTotals{FallbackReason: make(map[string]int)},
 	}
+	golden := mappingGoldenSnapshot{SchemaVersion: 1, Oracle: "streams-legacy-java-2026", Cases: make([]mappingGoldenOutcome, 0, len(cases)*4)}
 	for _, tc := range cases {
 		for _, mode := range []string{"1000", "0100", "1010", "0010"} {
 			fields := map[string]string{"before":"text", "selected":tc.fieldType, "after":"text"}
@@ -150,6 +199,13 @@ func TestMappingFallbackAudit(t *testing.T) {
 			metrics := m.fallbackAudit.snapshot()
 			wantMapped, wantOutput, javaErr := m.referenceMap(tc.input)
 			m.reference.close()
+			goldenCase := mappingGoldenOutcome{Scenario: tc.name, Mode: mode, JavaError: javaErr != nil}
+			if javaErr == nil {
+				var digestErr error
+				goldenCase.Digest, digestErr = mappingGoldenDigest(wantMapped, wantOutput)
+				if digestErr != nil { t.Fatal(digestErr) }
+			}
+			golden.Cases = append(golden.Cases, goldenCase)
 			equivalent := (goErr == nil) == (javaErr == nil)
 			if equivalent && goErr == nil {
 				gotJSON, firstErr := json.Marshal(mapped)
@@ -198,10 +254,19 @@ func TestMappingFallbackAudit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if path := os.Getenv("STREAMS_MAPPING_GOLDEN_OUTPUT"); path != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil { t.Fatal(err) }
+		data, err := json.MarshalIndent(golden, "", "  ")
+		if err != nil { t.Fatal(err) }
+		if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil { t.Fatal(err) }
+	}
 	t.Logf("synthetic fallback audit: %d cases, %d native, %d Java fallbacks, %d mismatches; reasons=%v",
 		report.Totals.Cases, report.Totals.Native, report.Totals.JavaFallback,
 		report.Totals.Mismatches, report.Totals.FallbackReason)
 	if report.Totals.Mismatches != 0 {
 		t.Fatalf("Go and Java disagree in %d synthetic audit cases; inspect the audit artifact", report.Totals.Mismatches)
+	}
+	if report.Totals.JavaFallback != 0 {
+		t.Fatalf("%d synthetic audit cases still require the Java bridge; inspect the audit artifact", report.Totals.JavaFallback)
 	}
 }

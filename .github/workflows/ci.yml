@@ -58,6 +58,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/artifacts/mapping-audit"
           cd sources/go
           STREAMS_MAPPING_AUDIT_OUTPUT="$GITHUB_WORKSPACE/artifacts/mapping-audit/report.json" \
+            STREAMS_MAPPING_GOLDEN_OUTPUT="$GITHUB_WORKSPACE/artifacts/mapping-audit/golden.json" \
             STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
             STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
             go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestMappingFallbackAudit|TestMalformedJaywayRuleParity|TestLegacyTerminalFunctionParity)$' -v .
@@ -67,7 +68,7 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         with:
           name: mapping-fallback-audit
-          path: artifacts/mapping-audit/report.json
+          path: artifacts/mapping-audit/*.json
           retention-days: 14
           if-no-files-found: warn
 

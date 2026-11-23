@@ -102,3 +102,18 @@ rule expressions, field names or any input document. A successful static
 compile is not proof of runtime equivalence; data-dependent JSONPath and URL
 behavior must still pass the differential tests described above. Keep local
 customer rule files outside the Git repository and CI artifacts.
+
+## Frozen Java oracle outcomes
+
+The same synthetic audit can export a compact Java oracle snapshot with
+`STREAMS_MAPPING_GOLDEN_OUTPUT=/path/to/golden.json`. Each record contains
+a synthetic scenario label, output mode, whether Java returned an error and a
+SHA-256 digest of the canonical mapped/PQ JSON and Kafka output. Valid JSON
+object key order is normalized; non-JSON legacy outputs are hashed verbatim.
+
+This is **not** a substitute for running the original Java oracle during
+migration. It is intended to provide JVM-independent regression coverage
+after the source of the golden values has been frozen and reviewed. Both the
+JSON snapshot and audit report are uploaded in the CI audit artifact. The
+audit test now fails if any synthetic case uses Java at runtime, even if its
+fallback result matches Java.
