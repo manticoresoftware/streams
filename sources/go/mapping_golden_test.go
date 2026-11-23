@@ -18,7 +18,9 @@ func TestFrozenJavaMappingGolden(t *testing.T) {
 		t.Fatalf("open committed Java oracle snapshot: %v", err)
 	}
 	defer file.Close()
-	// Each synthetic scenario has exactly four golden outcomes in this order.
+	// The committed Java oracle records four distinct output modes. Java
+	// ignores OUTPUT_DOCS bit four, so each corresponding *1 mode must have
+	// exactly the same digest as its *0 mode.
 	modes := []string{"1000", "0100", "1010", "0010"}
 	expected := make(map[string]map[string]string)
 	scanner := bufio.NewScanner(file)
@@ -52,9 +54,9 @@ func TestFrozenJavaMappingGolden(t *testing.T) {
 	for _, tc := range cases {
 		modesExpected, exists := expected[tc.name]
 		if !exists { t.Fatalf("missing Java oracle case %q", tc.name) }
-		for _, mode := range modes {
+		for _, mode := range legacyMappingOutputModes {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
-				golden := modesExpected[mode]
+				golden := modesExpected[mode[:3]+"0"]
 				m := newMapper([]string{"before => before", tc.path+" => selected", "after => after"},
 					map[string]string{"before": "text", "selected": tc.fieldType, "after": "text"}, mode)
 				defer m.reference.close()
