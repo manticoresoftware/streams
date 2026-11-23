@@ -52,6 +52,14 @@ func TestLegacyTerminalFunctionParity(t *testing.T) {
 		{"append no argument", `{"before":"first","items":["red","blue"],"after":"last"}`, "items.append()", "text"},
 		{"URL index", `{"before":"first","items":["https://example.org/a","https://example.org/b"],"after":"last"}`, "items.index(0)", "url"},
 		{"URL append", `{"before":"first","items":"https://example.org/a","after":"last"}`, "items.append(\"suffix\")", "url"},
+		{"size string", `{"before":"first","items":"abc","after":"last"}`, "items.size()", "text"},
+		{"size null", `{"before":"first","items":null,"after":"last"}`, "items.size()", "text"},
+		{"size number", `{"before":"first","items":123,"after":"last"}`, "items.size()", "text"},
+		{"size boolean", `{"before":"first","items":true,"after":"last"}`, "items.size()", "text"},
+		{"size array", `{"before":"first","items":["red","blue"],"after":"last"}`, "items.size()", "text"},
+		{"size object", `{"before":"first","items":{"a":1,"b":2},"after":"last"}`, "items.size()", "text"},
+		{"URL size array", `{"before":"first","items":[1,2],"after":"last"}`, "items.size()", "url"},
+		{"URL size scalar", `{"before":"first","items":"https://example.org/a","after":"last"}`, "items.size()", "url"},
 	}
 	for _, tc := range cases {
 		for _, mode := range []string{"1000", "0100", "1010", "0010"} {

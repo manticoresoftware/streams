@@ -11,7 +11,7 @@ import (
 
 // Jayway's terminal path functions are evaluated after selecting their input.
 // They are not fields literally named "first()" or "concat(...)".
-var legacyTerminalFunction = regexp.MustCompile(`^(.+)\.(first|last|keys|concat|sum|min|max|avg|stddev|index|append)\((.*)\)$`)
+var legacyTerminalFunction = regexp.MustCompile(`^(.+)\.(first|last|keys|concat|sum|min|max|avg|stddev|index|append|size)\((.*)\)$`)
 
 // The parser accepts only a deliberately unambiguous grammar here. Unsupported
 // expressions remain available to the Java oracle until proven equivalent.
@@ -81,6 +81,16 @@ func selectLegacyTerminalFunction(root map[string]any, path mappingPath) (value 
 	}
 	node := nodes[0]
 	switch path.terminalFunction {
+	case "size":
+		switch node.(type) {
+		case []any, map[string]any:
+			// Java's collection size is a Number, which cannot be cast to
+			// String in legacy mapping; the numeric magnitude is unobserved.
+			return json.Number("0"), true, false
+		default:
+			// On scalar/null receivers Java returns null.
+			return nil, true, false
+		}
 	case "index":
 		if len(path.terminalArgs) != 1 {
 			return nil, false, true
