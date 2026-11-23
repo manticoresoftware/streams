@@ -30,36 +30,10 @@ func TestMappingConfigurationAudit(t *testing.T) {
 	if len(configs) == 0 {
 		t.Fatal("configuration audit has no rule sets")
 	}
-	type entry struct {
-		ProfileIndex       int                    `json:"profile_index"`
-		OutputMode         string                 `json:"output_mode"`
-		RuleCount          int                    `json:"rule_count"`
-		StaticNative       bool                   `json:"static_native"`
-		Unsupported        []mappingFallbackIssue `json:"unsupported,omitempty"`
-		RuntimeParityKnown bool                   `json:"runtime_parity_known"`
-	}
-	report := struct {
-		SchemaVersion int     `json:"schema_version"`
-		Scope         string  `json:"scope"`
-		Profiles      []entry `json:"profiles"`
-	}{SchemaVersion: 1, Scope: "static-compilation-only"}
+	report := mappingConfigAuditReport{SchemaVersion: 1, Scope: "static-compilation-only"}
 	var unsupported int
 	for i, c := range configs {
-		if c.Output == "" {
-			c.Output = "1000"
-		}
-		if c.Fields == nil {
-			c.Fields = map[string]string{}
-		}
-		m := newMapper(c.Rules, c.Fields, c.Output)
-		summary := m.fallbackAudit.snapshot()
-		m.reference.close()
-		item := entry{
-			ProfileIndex: i, OutputMode: c.Output, RuleCount: len(c.Rules),
-			StaticNative: !m.needsReference,
-			Unsupported: summary.CompileIssues,
-			RuntimeParityKnown: false,
-		}
+		item := auditMappingProfile(config{rules: c.Rules, fields: c.Fields, output: c.Output}, i)
 		unsupported += len(item.Unsupported)
 		report.Profiles = append(report.Profiles, item)
 	}
