@@ -74,6 +74,13 @@ func serveWorker(ctx context.Context) error {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--audit-mapping" {
+		if err := auditWorkerMapping(os.Stdout); err != nil {
+			slog.Error("mapping configuration audit failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := serveWorker(ctx); err != nil && ctx.Err() == nil {
