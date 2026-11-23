@@ -117,3 +117,19 @@ after the source of the golden values has been frozen and reviewed. Both the
 JSON snapshot and audit report are uploaded in the CI audit artifact. The
 audit test now fails if any synthetic case uses Java at runtime, even if its
 fallback result matches Java.
+
+## Committed JVM-independent regression fixture
+
+After review, the Java oracle SHA-256 signatures are frozen in
+`sources/go/testdata/mapping_java_golden.tsv`. Rows are synthetic scenario
+names followed by the expected digests for output modes `1000`, `0100`,
+`1010`, and `0010`. The word `ERROR` records that Java rejected the
+document in that mode. The fixture is deliberately checked into Git so the
+Go-only `TestFrozenJavaMappingGolden` can run with `STREAMS_NATIVE_ONLY=1`,
+without any JVM, Java JAR, or Maven installation.
+
+The original Java-based differential test remains in CI during migration.
+Update the committed fixture **only** after deliberately rerunning the Java
+oracle on the synthetic corpus, reviewing the differences, and verifying the
+Go transformation behavior. Never regenerate golden values from the Go
+implementation itself.

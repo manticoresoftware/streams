@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/ohler55/ojg/jp"
@@ -10,7 +11,7 @@ import (
 
 // Jayway's terminal path functions are evaluated after selecting their input.
 // They are not fields literally named "first()" or "concat(...)".
-var legacyTerminalFunction = regexp.MustCompile(`^(.+)\.(first|last|keys|concat|sum|min|max|avg|stddev)\((.*)\)$`)
+var legacyTerminalFunction = regexp.MustCompile(`^(.+)\.(first|last|keys|concat|sum|min|max|avg|stddev|index|append)\((.*)\)$`)
 
 // The parser accepts only a deliberately unambiguous grammar here. Unsupported
 // expressions remain available to the Java oracle until proven equivalent.
@@ -28,12 +29,26 @@ func compileLegacyTerminalFunction(input string) (mappingPath, bool) {
 		return p, false
 	}
 	var args []string
-	if name == "concat" {
+	switch name {
+	case "concat":
 		if err := json.Unmarshal([]byte("["+arguments+"]"), &args); err != nil {
 			return p, false
 		}
-	} else if strings.TrimSpace(arguments) != "" {
-		return p, false
+	case "index":
+		// Invalid and missing indexes are Java runtime errors, not an
+		// unsupported static configuration. Defer validation until read.
+		args = []string{strings.TrimSpace(arguments)}
+	case "append":
+		// Jayway returns a collection for array/object receivers and the
+		// original receiver value for scalar inputs. We need only its type
+		// because legacy String assignments reject collections/numbers.
+		if !json.Valid([]byte("["+arguments+"]")) {
+			args = []string{"__invalid__"}
+		}
+	default:
+		if strings.TrimSpace(arguments) != "" {
+			return p, false
+		}
 	}
 	selector := "$." + prefix
 	if strings.HasPrefix(prefix, "[") {
@@ -66,6 +81,30 @@ func selectLegacyTerminalFunction(root map[string]any, path mappingPath) (value 
 	}
 	node := nodes[0]
 	switch path.terminalFunction {
+	case "index":
+		if len(path.terminalArgs) != 1 {
+			return nil, false, true
+		}
+		at, err := strconv.Atoi(path.terminalArgs[0])
+		if err != nil {
+			return nil, false, true
+		}
+		items, ok := node.([]any)
+		if !ok || at < -1 || at >= len(items) || len(items) == 0 {
+			return nil, false, true
+		}
+		if at == -1 {
+			at = len(items)-1
+		}
+		return items[at], true, false
+	case "append":
+		if len(path.terminalArgs) > 0 {
+			return nil, false, true
+		}
+		// append() preserves scalar receivers. Arrays/objects remain
+		// collections even when arguments append new values: the caller
+		// only observes whether Java can cast the result to String.
+		return node, true, false
 	case "first", "last":
 		items, ok := node.([]any)
 		if !ok || len(items) == 0 {

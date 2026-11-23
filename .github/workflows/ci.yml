@@ -63,27 +63,6 @@ jobs:
             STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
             go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestMappingFallbackAudit|TestMalformedJaywayRuleParity|TestLegacyTerminalFunctionParity)$' -v .
 
-      # This temporary migration-only step emits synthetic Java SHA-256
-      # signatures so they can be committed as Go-only regression fixtures.
-      - name: Emit synthetic Java golden digests for freezing
-        run: |
-          python3 - <<'PY'
-          import json, collections, os
-          path=os.path.join(os.environ["GITHUB_WORKSPACE"],"artifacts/mapping-audit/golden.json")
-          golden=json.load(open(path,encoding="utf-8"))
-          modes=("1000","0100","1010","0010")
-          entries=collections.OrderedDict()
-          for item in golden["cases"]:
-              entries.setdefault(item["scenario"],{})[item["mode"]]="ERROR" if item["java_error"] else item["digest"]
-          print("BEGIN_FROZEN_MAPPING_GOLDEN_TSV")
-          print("# Java oracle mapping digests (Jayway 2.8.0 / Streams Java worker)")
-          print("# scenario<TAB>1000<TAB>0100<TAB>1010<TAB>0010")
-          for scenario, digests in entries.items():
-              if set(digests)!=set(modes): raise ValueError("incomplete Java oracle")
-              print(scenario+chr(9)+chr(9).join(digests[mode] for mode in modes))
-          print("END_FROZEN_MAPPING_GOLDEN_TSV")
-          PY
-
       - name: Upload synthetic mapping fallback audit
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
