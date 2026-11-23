@@ -27,6 +27,12 @@ fi
 metrics=$(kubectl get --raw "$worker_api/metrics")
 grep -q '^# HELP worker_batch_size ' <<<"$metrics"
 
+# Verify the deployed pipeline's real environment compiles natively. This
+# command launches a separate read-only audit process without Kafka or Java.
+audit=$(kubectl -n "$APP_NAMESPACE" exec "$pod" -c "$container" -- /usr/src/myapp/streams-worker --audit-mapping)
+jq -e '.schema_version == 1 and (.profiles | length) == 1 and .profiles[0].static_native == true and .profiles[0].runtime_parity_known == false' <<<"$audit" >/dev/null
+echo 'Deployed worker mapping configuration: static native check passed (runtime parity not inferred)'
+
 assigned=$(awk '/Kafka partitions assigned after/ {print $1; exit}' <<<"$logs")
 test -n "$assigned" || { echo 'First Kafka assignment missing from worker logs' >&2; exit 1; }
 pod_json=$(kubectl -n "$APP_NAMESPACE" get pod "$pod" -o json)
