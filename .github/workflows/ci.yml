@@ -80,7 +80,7 @@ jobs:
           print("# scenario<TAB>1000<TAB>0100<TAB>1010<TAB>0010")
           for scenario, digests in entries.items():
               if set(digests)!=set(modes): raise ValueError("incomplete Java oracle")
-              print(scenario+"\\t"+"\\t".join(digests[mode] for mode in modes))
+              print(scenario+chr(9)+chr(9).join(digests[mode] for mode in modes))
           print("END_FROZEN_MAPPING_GOLDEN_TSV")
           PY
 
