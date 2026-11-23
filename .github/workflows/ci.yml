@@ -131,6 +131,8 @@ jobs:
         run: |
           docker build -t streams/worker:ci -f docker/worker/Dockerfile .
           docker image inspect --format 'Worker image size in bytes = {{.Size}}' streams/worker:ci
+      - name: Validate audit-only Kafka sampler
+        run: docker build --target compat-audit-build -t streams/worker-audit:ci -f docker/worker/Dockerfile .
       - name: Package JSLT audit test binary and Java reference
         run: |
           set -euo pipefail
