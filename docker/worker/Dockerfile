@@ -26,8 +26,9 @@ RUN set -eu; \
       sleep 5; \
     done; \
     cp target/*-jar-with-dependencies.jar /KafkaHandler.jar
-COPY sources/go/compat/StreamsCompat.java /tmp/StreamsCompat.java
-RUN mkdir /compat && javac -cp /KafkaHandler.jar -d /compat /tmp/StreamsCompat.java
+COPY sources/go/compat/StreamsCompat.java sources/go/compat/KafkaAuditSampler.java /tmp/
+RUN mkdir /compat && javac -cp /KafkaHandler.jar -d /compat /tmp/StreamsCompat.java /tmp/KafkaAuditSampler.java \
+    && java -cp /compat:/KafkaHandler.jar KafkaAuditSampler --self-test
 
 FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2 AS compat-test
 
