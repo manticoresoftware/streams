@@ -37,6 +37,7 @@ func TestAuditWorkerMapping(t *testing.T) {
 
 	t.Setenv("TRANSFORM_RULES", "before => before")
 	output.Reset()
+	report = mappingConfigAuditReport{}
 	if err := auditWorkerMapping(&output); err != nil {
 		t.Fatal(err)
 	}
