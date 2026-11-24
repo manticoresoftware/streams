@@ -1,4 +1,4 @@
-FROM php:8.5.12-fpm@sha256:f665ad19c093eee54db3a03c89102d6828b1bbf4f327689e5947a8686c6585a1
+FROM php:8.5.13-fpm@sha256:52ba6f178d0a08f348578b03595661b7ff13defafacf4c823d045f2ecba8db8f
 
 COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 RUN apt update && apt install -y librdkafka-dev zlib1g-dev libpng-dev libjpeg-dev git \

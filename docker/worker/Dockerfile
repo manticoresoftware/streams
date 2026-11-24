@@ -46,7 +46,7 @@ RUN apt-get update \
     && echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/php.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends php8.5-cli php8.5-mbstring \
-    && php -r 'if (PHP_VERSION_ID < 80512 || PHP_VERSION_ID >= 80600) exit(1);' \
+    && php -r 'if (PHP_VERSION_ID < 80513 || PHP_VERSION_ID >= 80600) exit(1);' \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=compat-build /KafkaHandler.jar /KafkaHandler.jar
 COPY --from=compat-build /compat /compat

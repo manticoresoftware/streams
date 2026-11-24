@@ -8,7 +8,7 @@ RUN apt-get update && echo 'debconf debconf/frontend select Noninteractive' | de
     && echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/php.list \
     && apt-get update && apt-get install -y \
     php8.5-cli php8.5-mysql php8.5-zip php8.5-curl php8.5-xml php8.5-mbstring \
-    && php -r 'if (PHP_VERSION_ID < 80512 || PHP_VERSION_ID >= 80600) exit(1);' \
+    && php -r 'if (PHP_VERSION_ID < 80513 || PHP_VERSION_ID >= 80600) exit(1);' \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy from docker/manticore/ context

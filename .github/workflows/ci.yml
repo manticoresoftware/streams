@@ -93,7 +93,7 @@ jobs:
         with:
           name: ci-image-${{ matrix.component }}
           path: ${{ matrix.component }}.tar.gz
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
   ui-image-build:
@@ -118,7 +118,7 @@ jobs:
         with:
           name: ci-image-${{ matrix.component }}
           path: ${{ matrix.component }}.tar.gz
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
   worker-image-build:
@@ -170,7 +170,7 @@ jobs:
         with:
           name: ci-image-worker
           path: worker.tar.gz
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
   helm:
