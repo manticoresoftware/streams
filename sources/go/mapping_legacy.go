@@ -126,6 +126,10 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 		}
 		if root, valid := parse(repaired); valid {
 			if doc, isObject := root.(map[string]any); isObject {
+				selected, _, normalized, err := parseLegacyMappingDocument(repaired, mode)
+				if err == nil {
+					return selected, root, normalized, nil
+				}
 				return doc, root, repaired, nil
 			}
 		}
@@ -141,6 +145,10 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 	if single, ok := normalizeSingleQuotedJSON(raw); ok {
 		if root, valid := parse(single); valid {
 			if doc, isObject := root.(map[string]any); isObject {
+				selected, _, normalized, err := parseLegacyMappingDocument(single, mode)
+				if err == nil {
+					return selected, root, normalized, nil
+				}
 				return doc, root, single, nil
 			}
 		}
@@ -154,6 +162,10 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 	if err := decoder.Decode(&first); err == nil {
 		if doc, isObject := first.(map[string]any); isObject {
 			normalized := raw[:decoder.InputOffset()]
+			selected, _, selectionRaw, err := parseLegacyMappingDocument(normalized, mode)
+			if err == nil {
+				return selected, first, selectionRaw, nil
+			}
 			return doc, first, normalized, nil
 		}
 		return map[string]any{}, first, "{}", nil

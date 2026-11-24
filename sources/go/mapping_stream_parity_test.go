@@ -26,6 +26,23 @@ import (
 // Preserve number tokens and duplicate values (including their relative order)
 // while ignoring only object-key order. Invalid JSON is compared verbatim.
 func strictCorpusJSON(raw string) string {
+	// encoding/json replaces isolated UTF-16 surrogates with U+FFFD. Keep
+	// any surrogate-escape-containing output verbatim rather than risk
+	// collapsing distinct strings/keys. Valid pairs are conservative too.
+	for i := 0; i+5 < len(raw); i++ {
+		if raw[i] != '\\' {
+			continue
+		}
+		if raw[i+1] == '\\' {
+			i++
+			continue
+		}
+		if raw[i+1] == 'u' {
+			if code, err := strconv.ParseUint(raw[i+2:i+6], 16, 16); err == nil && code >= 0xd800 && code <= 0xdfff {
+				return "raw:" + raw
+			}
+		}
+	}
 	d := json.NewDecoder(strings.NewReader(raw))
 	d.UseNumber()
 	s, err := corpusJSONValue(d)
@@ -113,7 +130,9 @@ func TestStrictCorpusComparison(t *testing.T) {
 		{`{"a":1,"b":[2,3]}`, `{"b":[2,3],"a":1}`, true},
 		{`{"a":1,"a":2}`, `{"a":2}`, false},
 		{`{"a":1,"a":2}`, `{"a":2,"a":1}`, false},
-		{`1 trailing`, `1`, false}, {`9007199254740993`, `9007199254740992`, false},
+		{`1 trailing`, `1`, false},
+		{`"\ud800"`, `"\ud801"`, false},
+		{`{"\ud800":1}`, `{"\ufffd":1}`, false}, {`9007199254740993`, `9007199254740992`, false},
 		{`[1,2]`, `[2,1]`, false}, {`1e2`, `100`, false},
 	} {
 		if (strictCorpusJSON(tc.a) == strictCorpusJSON(tc.b)) != tc.same {
