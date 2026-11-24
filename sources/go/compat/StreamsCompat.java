@@ -43,7 +43,9 @@ public class StreamsCompat {
         return document -> {
             try {
                 ObjectNode result = JSON.createObjectNode();
-                result.set("mapped", JSON.readTree(mapper.transform(document)));
+                String mapped = mapper.transform(document);
+                result.put("mapped_raw", mapped);
+                result.set("mapped", JSON.readTree(mapped));
                 result.put("output", mapper.getOutputDocs());
                 return result.toString();
             } finally {

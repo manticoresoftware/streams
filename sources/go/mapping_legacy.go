@@ -88,6 +88,17 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 			return fail()
 		}
 		if doc, ok := root.(map[string]any); ok {
+			// Jayway/json-smart has a different string path once a token
+			// contains an escape: its permissive reader drops literal DEL.
+			// JsonIterator (whole_document and Kafka output) retains it.
+			normalized := normalizeLegacyEscapedDEL(raw)
+			if normalized != raw {
+				if selected, valid := parse(normalized); valid {
+					if selectedDoc, object := selected.(map[string]any); object {
+						return selectedDoc, root, normalized, nil
+					}
+				}
+			}
 			return doc, root, raw, nil
 		}
 		// JsonIterator.asMap() and JsonPath.put/delete() fail for scalar and
@@ -148,6 +159,42 @@ func parseLegacyMappingDocument(raw, mode string) (map[string]any, any, string, 
 		return map[string]any{}, first, "{}", nil
 	}
 	return fail()
+}
+
+// Match json-smart 2.4.11's escaped-string reader only. A literal DEL in
+// a token without escapes, or the decoded escape \\u007f, is not removed.
+// Keep the original source separately for JsonIterator's whole_document path.
+func normalizeLegacyEscapedDEL(raw string) string {
+	if !strings.ContainsRune(raw, '\x7f') {
+		return raw
+	}
+	var out strings.Builder
+	copied := 0
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '"' {
+			continue
+		}
+		start := i
+		escapedToken := false
+		for i++; i < len(raw); i++ {
+			if raw[i] == '\\' {
+				escapedToken = true
+				i++
+			} else if raw[i] == '"' {
+				break
+			}
+		}
+		if escapedToken && i < len(raw) && strings.ContainsRune(raw[start:i+1], '\x7f') {
+			out.WriteString(raw[copied:start])
+			out.WriteString(strings.ReplaceAll(raw[start:i+1], "\x7f", ""))
+			copied = i + 1
+		}
+	}
+	if copied == 0 {
+		return raw
+	}
+	out.WriteString(raw[copied:])
+	return out.String()
 }
 
 // Convert only the unambiguous single-quote JSON string grammar. Keep
