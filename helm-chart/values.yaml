@@ -1,5 +1,7 @@
 ui:
   replicas: 1
+  # Only IPs/CIDRs of proxies that overwrite X-Forwarded-Proto; empty trusts none.
+  trustedProxies: []
   userId: 33
   admin:
     email: manticore@example.com

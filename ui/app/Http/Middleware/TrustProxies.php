@@ -7,27 +7,23 @@ use Illuminate\Http\Middleware\TrustProxies as Middleware;
 
 class TrustProxies extends Middleware
 {
-    /**
-     * The trusted proxies for this application.
-     *
-     * The UI is only reachable through the ingress controller and the nginx
-     * sidecar, so trust the forwarding headers they set: otherwise requests that
-     * arrive over https generate http:// URLs (e.g. the login form action) and
-     * browsers refuse to submit the form.
-     *
-     * @var array|string|null
-     */
-    protected $proxies = '*';
+    // Only the original scheme is needed for TLS-terminating ingress.
+    protected $headers = Request::HEADER_X_FORWARDED_PROTO;
 
-    /**
-     * The headers that should be used to detect proxies.
-     *
-     * @var int
-     */
-    protected $headers =
-        Request::HEADER_X_FORWARDED_FOR |
-        Request::HEADER_X_FORWARDED_HOST |
-        Request::HEADER_X_FORWARDED_PORT |
-        Request::HEADER_X_FORWARDED_PROTO |
-        Request::HEADER_X_FORWARDED_AWS_ELB;
+    protected function setTrustedProxyIpAddresses(Request $request)
+    {
+        $proxies = array_filter(
+            array_map('trim', explode(',', (string) config('app.trusted_proxies', ''))),
+            static function (string $proxy): bool {
+                [$ip, $prefix] = array_pad(explode('/', $proxy, 2), 2, null);
+
+                return filter_var($ip, FILTER_VALIDATE_IP) !== false
+                    && ($prefix === null || (ctype_digit($prefix) && (int) $prefix >= 1
+                        && (int) $prefix <= (str_contains($ip, ':') ? 128 : 32)));
+            }
+        );
+
+        // Do not fall back to Laravel's automatic trust-all proxy detection.
+        $request->setTrustedProxies(array_values($proxies), $this->getTrustedHeaderNames());
+    }
 }

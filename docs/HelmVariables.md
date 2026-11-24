@@ -16,12 +16,24 @@ Parameter | Description | Default
 `ui.nginx.image.imagePullPolicy` | Nginx sidecar image pull policy | `IfNotPresent`
 `ui.migrationWait.maxAttempts` | Maximum UI init-container checks while waiting for migrations to complete | `120`
 `ui.migrationWait.sleepSeconds` | Seconds between UI init-container migration checks | `5`
+`ui.trustedProxies` | List of trusted reverse proxy IPs or CIDRs for HTTPS URL generation | `[]`
 `ui.service.port` | UI service port | `80`
 `ui.service.targetPort` | UI service target port | `8080`
 `ui.service.loadBalancer.enabled` | Enable Load Balancer for UI service | `false`
 `ui.service.loadBalancer.ip` | Enable Load Balancer for UI service | `192.168.0.1`
 `ui.volumeClaimTemplates.size` | Size for UI volume | `200Mi`
 `ui.resources` | Allow to specify UI limits and requests | `{}`
+
+When TLS terminates at the ingress or another reverse proxy, set `ui.trustedProxies` to the IPs or CIDRs of the proxies as seen by the UI nginx sidecar. For example:
+
+```yaml
+ui:
+  trustedProxies:
+    - 192.0.2.10
+    - 2001:db8::/64
+```
+
+Use your actual proxy addresses, not entire shared pod or node networks. The proxy must overwrite client-supplied `X-Forwarded-Proto` with the actual scheme. Only this header is trusted; forwarded host, port and client IP are ignored. An empty list trusts no proxies; wildcard addresses, catch-all CIDRs and invalid entries are ignored. For non-Helm deployments, set `TRUSTED_PROXIES` to a comma-separated list of the same IPs/CIDRs.
 
 ### MYSQL section
 Parameter | Description | Default
