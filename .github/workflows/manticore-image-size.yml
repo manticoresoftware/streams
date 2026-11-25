@@ -53,6 +53,7 @@ jobs:
             --build-arg PRUNE_PROFILE=reference --target slim-runtime -t streams/manticore:reference docker/manticore
           docker run --rm --entrypoint cat streams/manticore:optimized \
             /etc/manticoresearch/composer.lock > manticore-composer.lock
+          cmp docker/manticore/composer.lock manticore-composer.lock
           docker run --rm --entrypoint cat streams/manticore:slim \
             /etc/manticoresearch/composer.lock | cmp - manticore-composer.lock
           docker run --rm --entrypoint cat streams/manticore:reference \

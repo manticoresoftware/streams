@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import pathlib
+import statistics
 import subprocess
 import sys
 import time
@@ -37,6 +38,7 @@ def start():
     p = pod()
     ready = next(c for c in p["status"]["conditions"] if c["type"] == "Ready" and c["status"] == "True")
     container = next(c for c in p["status"]["containerStatuses"] if c["name"].endswith("-manticore"))
+    assert container["restartCount"] == 0, "Manticore restarted before benchmark"
     t0 = time.monotonic()
     _, cpu0 = snapshot(p)
     time.sleep(10)
@@ -51,7 +53,7 @@ def start():
         "manticore_start_to_pod_ready_s": (dt(ready["lastTransitionTime"]) - dt(container["state"]["running"]["startedAt"])).total_seconds(),
         "idle_memory_mib": memory / 1048576,
         "idle_cpu_mcores": (cpu1 - cpu0) / idle_elapsed / 1000,
-        "workload_start_time": time.time(),
+        "workload_start_time": time.monotonic(),
         "workload_start_cpu_usec": cpu1,
         "input_records": int(os.environ["FIXTURE_RECORDS"]),
         "expected_output_records": int(os.environ["EXPECTED_RECORDS"]),
@@ -59,7 +61,7 @@ def start():
     REPORT.write_text(json.dumps(data, indent=2) + "\n")
 
 def finish():
-    end = time.time()
+    end = time.monotonic()
     data = json.loads(REPORT.read_text())
     p = pod()
     c = next(c for c in p["status"]["containerStatuses"] if c["name"].endswith("-manticore"))
@@ -76,10 +78,27 @@ def finish():
     print(REPORT.read_text())
 
 def summary():
-    data = [json.loads(pathlib.Path("benchmark", "manticore-benchmark-" + variant, REPORT.name).read_text()) for variant in ("reference", "candidate")]
-    assert data[0]["input_records"] == data[1]["input_records"]
-    assert data[0]["expected_output_records"] == data[1]["expected_output_records"]
-    lines = ["## Manticore image runtime comparison", "", "| Metric | Previous slim | Current slim |", "| --- | ---: | ---: |"]
+    variants = ("reference", "candidate")
+    data = {
+        variant: [
+            json.loads(pathlib.Path("benchmark", f"manticore-benchmark-{variant}-{i}", REPORT.name).read_text())
+            for i in range(1, 4)
+        ]
+        for variant in variants
+    }
+    all_runs = data["reference"] + data["candidate"]
+    assert len({r["input_records"] for r in all_runs}) == 1
+    assert len({r["expected_output_records"] for r in all_runs}) == 1
+    for runs in data.values():
+        assert len({r["image"] for r in runs}) == 1, "Image changed between repetitions"
+    lines = [
+        "## Manticore image runtime comparison",
+        "",
+        "Median of three repetitions per variant; ranges in parentheses.",
+        "",
+        "| Metric | Previous slim | Current slim |",
+        "| --- | ---: | ---: |",
+    ]
     for name, key in (
         ("Pod creation to ready (s)", "pod_creation_to_ready_s"),
         ("Manticore container start to pod ready (s)", "manticore_start_to_pod_ready_s"),
@@ -90,12 +109,20 @@ def summary():
         ("Manticore CPU during fixture (s)", "fixture_manticore_cpu_s"),
         ("Post-fixture memory (MiB)", "post_fixture_memory_mib"),
     ):
-        lines.append(f"| {name} | {data[0][key]:.2f} | {data[1][key]:.2f} |")
-    lines += ["", "One existing Kafka E2E fixture per variant on separate GitHub-hosted runners of the same type. Images are preloaded; startup includes other pod containers and Kubernetes scheduling. Throughput includes fixture publication and output polling (not an isolated steady-state PQ benchmark). Idle memory is cgroup usage including cache, and idle CPU is sampled over about ten seconds. Treat performance numbers as indicative, not a controlled regression threshold."]
+        def fmt(variant):
+            values = [r[key] for r in data[variant]]
+            return f"{statistics.median(values):.2f} ({min(values):.2f}–{max(values):.2f})"
+        lines.append(f"| {name} | {fmt('reference')} | {fmt('candidate')} |")
+    lines += [
+        "",
+        f"Each run verified {all_runs[0]['expected_output_records']} Kafka output records from {all_runs[0]['input_records']} fixture inputs.",
+        "Each repetition runs on a separate GitHub-hosted runner of the same type. Images are preloaded; startup includes other pod containers and Kubernetes scheduling. Throughput includes fixture publication and output polling, not isolated steady-state PQ throughput. Idle memory is cgroup usage including cache; idle CPU is sampled for about ten seconds. These measurements are indicative, not a controlled performance gate.",
+    ]
     report = "\n".join(lines) + "\n"
     print(report)
     with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
         f.write(report)
+
 
 if __name__ == "__main__":
     {"start": start, "finish": finish, "summary": summary}[sys.argv[1]]()

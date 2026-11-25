@@ -25,8 +25,9 @@ RUN apt-get update \
 COPY --from=composer-bin /usr/bin/composer /usr/local/bin/composer
 
 WORKDIR /build/deps
-COPY composer.* ./
-RUN COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-progress \
+COPY composer.json composer.lock ./
+RUN composer validate --no-check-publish \
+    && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-progress \
     && composer check-platform-reqs --no-dev \
     && sed -i "s/'version' => 2.0,//" vendor/manticoresoftware/manticoresearch-auto-replication/src/K8s/ApiClient.php
 
@@ -56,7 +57,7 @@ WORKDIR /etc/manticoresearch/
 USER manticore:manticore
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisord.conf"]
 
-# Experimental Streams-only pruning. The official Manticore image is unchanged.
+# Streams-only pruning. The official Manticore image is unchanged.
 # Retain package metadata and shared dependencies. The reference profile is
 # the previous slim image; the default Streams profile prunes more features.
 FROM runtime AS prune
