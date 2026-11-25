@@ -29,7 +29,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/manticore-baseline"
           git archive "$BASE_SHA" docker/manticore | tar -x -C "$RUNNER_TEMP/manticore-baseline"
           old="$RUNNER_TEMP/manticore-baseline/docker/manticore"
-          base_tag=$(awk '$1 == "FROM" { print $2; exit }' "$old/Dockerfile")
+          base_tag=$(sed -n 's/^ARG MANTICORE_IMAGE=//p' docker/manticore/Dockerfile)
           composer_tag=$(sed -n 's/^ARG COMPOSER_IMAGE=//p' docker/manticore/Dockerfile)
           docker pull "$base_tag"
           docker pull "$composer_tag"
@@ -37,14 +37,19 @@ jobs:
           composer_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$composer_tag")
           printf 'Base: %s\nComposer: %s\n' "$base_ref" "$composer_ref" | tee image-inputs.txt
 
-          # Use identical base and Composer images for both builds.
-          sed -i "1s|^FROM .*|FROM $base_ref|; s|COPY --from=composer:latest |COPY --from=$composer_ref |" "$old/Dockerfile"
+          # Use the candidate's base and Composer digests for both builds,
+          # including comparisons against the original single-stage Dockerfile.
+          if ! grep -q '^ARG MANTICORE_IMAGE=' "$old/Dockerfile"; then
+            sed -i "1s|^FROM .*|FROM $base_ref|; s|COPY --from=composer:latest |COPY --from=$composer_ref |" "$old/Dockerfile"
+          fi
           docker build --no-cache --progress=plain \
             --build-arg MANTICORE_IMAGE="$base_ref" --build-arg COMPOSER_IMAGE="$composer_ref" \
             -t streams/manticore:optimized docker/manticore
           docker run --rm --entrypoint cat streams/manticore:optimized \
             /etc/manticoresearch/composer.lock > manticore-composer.lock
-          docker build --no-cache --progress=plain -t streams/manticore:baseline "$old"
+          docker build --no-cache --progress=plain \
+            --build-arg MANTICORE_IMAGE="$base_ref" --build-arg COMPOSER_IMAGE="$composer_ref" \
+            -t streams/manticore:baseline "$old"
       - name: Compare image sizes and layers
         run: |
           set -euo pipefail
@@ -72,6 +77,7 @@ jobs:
             row 'Gzip Docker archive' "$before_gz" "$after_gz"
             echo
             printf 'Base image: %s bytes; baseline: %s bytes; optimized: %s bytes.\n' "$base" "$before" "$after"
+            echo 'Both builds use the candidate base and Composer digests; APT package versions are resolved at build time.'
             echo 'Gzip archive sizes are a comparable transfer-size proxy, not registry layer sizes.'
           } | tee image-size.md
           cat image-size.md >> "$GITHUB_STEP_SUMMARY"
