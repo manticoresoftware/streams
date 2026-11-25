@@ -76,7 +76,7 @@ ENTRYPOINT ["/usr/src/myapp/streams-worker"]
 FROM native-runtime AS native-test
 COPY --from=go-test /worker.test /worker.test
 # The frozen synthetic Java outputs are checked in the JVM-free image.
-COPY sources/go/testdata/ ./testdata/
+COPY --chown=worker:worker sources/go/testdata/ ./testdata/
 ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
 RUN /usr/src/myapp/streams-worker --audit-mapping | grep -q '"static_native":true'
 RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestJSLTParseTimePrefixNative|TestJSLTReplaceRegexCacheParity|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestNativeScalarWildcardInputs|TestStrictNativeMapper|TestStrictNativeMalformedDocuments|TestStrictNativeNonObjectRoots|TestStrictNativeNestedDuplicateKeys|TestURLHashGolden|TestNativeLowercase|TestLegacyTerminalFunctionParity|TestFrozenJavaMappingGolden|TestAuditWorkerMapping)$"]
