@@ -172,6 +172,17 @@ jobs:
           path: worker.tar.gz
           retention-days: 7
           if-no-files-found: error
+      - name: Build isolated real Kafka test image
+        run: |
+          docker build --target real-kafka-test -t streams/worker-kafka-test:ci -f docker/worker/Dockerfile .
+          docker save streams/worker-kafka-test:ci | gzip > worker-kafka-test.tar.gz
+          gzip -t worker-kafka-test.tar.gz
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: ci-kafka-fault-test
+          path: worker-kafka-test.tar.gz
+          retention-days: 1
+          if-no-files-found: error
 
   helm:
     runs-on: ubuntu-24.04
@@ -316,6 +327,19 @@ jobs:
       - name: Import validated images into K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/import-ci-images.sh
+      - name: Download real Kafka fault test image
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
+        with:
+          name: ci-kafka-fault-test
+          path: ci-fault-test
+      - name: Import real Kafka test image into K3s
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          gzip -dc ci-fault-test/worker-kafka-test.tar.gz | docker load
+          docker tag streams/worker-kafka-test:ci ghcr.io/manticoresoftware/streams/worker-kafka-test:ci
+          docker image save ghcr.io/manticoresoftware/streams/worker-kafka-test:ci | sudo k3s ctr -n k8s.io images import -
       - name: Install Kafka and chart
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/install-streams-chart.sh
@@ -325,6 +349,9 @@ jobs:
       - name: Create Kafka test topics
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/create-kafka-test-topics.sh
+      - name: Verify real Kafka fault injection and offset recovery
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/run-real-kafka-fault-tests.sh
       - name: Migrate and seed Laravel cluster test database
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
