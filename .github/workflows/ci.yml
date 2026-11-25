@@ -123,7 +123,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - run: mvn clean compile assembly:single
+      - run: mvn clean compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single
         working-directory: sources/src
       - run: cp sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar docker/worker/KafkaHandler.jar
       - run: docker build -t streams/worker:ci docker/worker
