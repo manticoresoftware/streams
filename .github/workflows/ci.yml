@@ -30,7 +30,7 @@ jobs:
         working-directory: sources/src
 
   image-build:
-    needs: worker-tests
+    needs: [worker-tests, changes]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -50,6 +50,21 @@ jobs:
         with:
           name: ci-image-${{ matrix.component }}
           path: ${{ matrix.component }}.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+      - name: Build reference Manticore image for PR benchmark
+        if: matrix.component == 'manticore' && github.event_name == 'pull_request' && needs.changes.outputs.manticore_image == 'true'
+        run: |
+          set -euo pipefail
+          docker build --build-arg PRUNE_PROFILE=reference -t streams/manticore:reference docker/manticore
+          docker run --rm --entrypoint cat streams/manticore:ci /etc/manticoresearch/composer.lock > /tmp/candidate.lock
+          docker run --rm --entrypoint cat streams/manticore:reference /etc/manticoresearch/composer.lock | cmp - /tmp/candidate.lock
+          docker save streams/manticore:reference | gzip > manticore-reference.tar.gz
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        if: matrix.component == 'manticore' && github.event_name == 'pull_request' && needs.changes.outputs.manticore_image == 'true'
+        with:
+          name: benchmark-manticore-reference
+          path: manticore-reference.tar.gz
           retention-days: 7
           if-no-files-found: error
 
@@ -121,12 +136,15 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      manticore_image: ${{ steps.filter.outputs.manticore_image }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v3.0.2
         id: filter
         with:
           filters: |
+            manticore_image:
+              - 'docker/manticore/**'
             relevant:
               - 'docker/**'
               - 'ui/**'
@@ -183,7 +201,12 @@ jobs:
         run: docker compose -f .github/docker-compose/laravel-tests.yml down --volumes --remove-orphans
 
   k8s-e2e:
+    name: ${{ matrix.variant == 'reference' && 'k8s-e2e (reference)' || 'k8s-e2e' }}
     needs: [worker-tests, image-build, ui-image-build, worker-image-build, helm, changes, laravel-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(github.event_name == 'pull_request' && needs.changes.outputs.manticore_image == 'true' && '["candidate","reference"]' || '["candidate"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
@@ -228,8 +251,16 @@ jobs:
           pattern: ci-image-*
           path: ci-images
           merge-multiple: true
+      - name: Download reference Manticore image
+        if: matrix.variant == 'reference'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
+        with:
+          name: benchmark-manticore-reference
+          path: ci-reference
       - name: Import validated images into K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        env:
+          MANTICORE_REFERENCE_ARCHIVE: ${{ matrix.variant == 'reference' && 'ci-reference/manticore-reference.tar.gz' || '' }}
         run: bash .github/scripts/k8s/import-ci-images.sh
       - name: Install Kafka and chart
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
@@ -264,23 +295,48 @@ jobs:
       - name: Start Kafka fixture producer
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/start-kafka-fixture-producer.sh
+      - name: Measure idle Manticore and record workload start
+        if: github.event_name == 'pull_request' && needs.changes.outputs.manticore_image == 'true'
+        run: python3 .github/scripts/k8s/report-manticore-benchmark.py start
       - name: Publish Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/publish-kafka-fixture.sh
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/verify-kafka-processing.sh
+      - name: Report Manticore benchmark
+        if: github.event_name == 'pull_request' && needs.changes.outputs.manticore_image == 'true'
+        run: python3 .github/scripts/k8s/report-manticore-benchmark.py finish
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        if: github.event_name == 'pull_request' && needs.changes.outputs.manticore_image == 'true'
+        with:
+          name: manticore-benchmark-${{ matrix.variant }}
+          path: manticore-benchmark.json
+          retention-days: 7
+          if-no-files-found: error
       - name: Collect diagnostics
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         run: bash .github/scripts/k8s/collect-diagnostics.sh artifacts/k8s
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         if: failure() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         with:
-          name: k8s-e2e-diagnostics
+          name: k8s-e2e-diagnostics-${{ matrix.variant }}
           path: |
             artifacts/
             artifacts-rendered-helm.yaml
           retention-days: 3
+
+  manticore-benchmark-summary:
+    needs: [changes, k8s-e2e]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.manticore_image == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
+        with:
+          pattern: manticore-benchmark-*
+          path: benchmark
+      - run: python3 .github/scripts/k8s/report-manticore-benchmark.py summary
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'

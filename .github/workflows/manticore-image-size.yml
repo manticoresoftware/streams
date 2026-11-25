@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
         with:
           fetch-depth: 0
-      - name: Build all three images against the same base digest
+      - name: Build all four images against the same base digest
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -48,9 +48,14 @@ jobs:
           docker build --progress=plain \
             --build-arg MANTICORE_IMAGE="$base_ref" --build-arg COMPOSER_IMAGE="$composer_ref" \
             --target slim-runtime -t streams/manticore:slim docker/manticore
+          docker build --progress=plain \
+            --build-arg MANTICORE_IMAGE="$base_ref" --build-arg COMPOSER_IMAGE="$composer_ref" \
+            --build-arg PRUNE_PROFILE=reference --target slim-runtime -t streams/manticore:reference docker/manticore
           docker run --rm --entrypoint cat streams/manticore:optimized \
             /etc/manticoresearch/composer.lock > manticore-composer.lock
           docker run --rm --entrypoint cat streams/manticore:slim \
+            /etc/manticoresearch/composer.lock | cmp - manticore-composer.lock
+          docker run --rm --entrypoint cat streams/manticore:reference \
             /etc/manticoresearch/composer.lock | cmp - manticore-composer.lock
           docker build --no-cache --progress=plain \
             --build-arg MANTICORE_IMAGE="$base_ref" --build-arg COMPOSER_IMAGE="$composer_ref" \
@@ -59,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           base_ref=$(sed -n 's/^Base: //p' image-inputs.txt)
-          for image in "$base_ref" streams/manticore:optimized streams/manticore:slim; do
+          for image in "$base_ref" streams/manticore:optimized streams/manticore:reference streams/manticore:slim; do
             {
               echo "=== $image ==="
               docker run --rm --user root --entrypoint sh "$image" -ec '
@@ -81,31 +86,33 @@ jobs:
           base=$(size "$base_ref")
           before=$(size streams/manticore:baseline)
           after=$(size streams/manticore:optimized)
+          reference=$(size streams/manticore:reference)
           slim=$(size streams/manticore:slim)
           before_gz=$(archive_size streams/manticore:baseline)
           after_gz=$(archive_size streams/manticore:optimized)
+          reference_gz=$(archive_size streams/manticore:reference)
           slim_gz=$(archive_size streams/manticore:slim)
           {
             echo '## Manticore Streams image size'
             echo
             cat image-inputs.txt
             echo
-            echo '| Metric | Baseline | Optimized | Slim | Slim vs baseline | Slim vs optimized |'
-            echo '| --- | ---: | ---: | ---: | ---: | ---: |'
+            echo '| Metric | Baseline | Optimized | Previous slim | Current slim | vs baseline | vs previous slim |'
+            echo '| --- | ---: | ---: | ---: | ---: | ---: | ---: |'
             row() {
-              awk -v name="$1" -v before="$2" -v after="$3" -v slim="$4" \
-                'BEGIN { printf "| %s | %.1f MiB | %.1f MiB | %.1f MiB | %.1f%% | %.1f%% |\n", name, before/1048576, after/1048576, slim/1048576, 100*(before-slim)/before, 100*(after-slim)/after }'
+              awk -v name="$1" -v before="$2" -v after="$3" -v ref="$4" -v slim="$5" \
+                'BEGIN { printf "| %s | %.1f MiB | %.1f MiB | %.1f MiB | %.1f MiB | %.1f%% | %.1f%% |\n", name, before/1048576, after/1048576, ref/1048576, slim/1048576, 100*(before-slim)/before, 100*(ref-slim)/ref }'
             }
-            row 'Uncompressed image' "$before" "$after" "$slim"
-            row 'Gzip Docker archive' "$before_gz" "$after_gz" "$slim_gz"
+            row 'Uncompressed image' "$before" "$after" "$reference" "$slim"
+            row 'Gzip Docker archive' "$before_gz" "$after_gz" "$reference_gz" "$slim_gz"
             echo
-            printf 'Base image: %s bytes; baseline: %s bytes; optimized: %s bytes; slim: %s bytes.\n' "$base" "$before" "$after" "$slim"
+            printf 'Base image: %s bytes; baseline: %s bytes; optimized: %s bytes; previous slim: %s bytes; slim: %s bytes.\n' "$base" "$before" "$after" "$reference" "$slim"
             echo 'All builds use the candidate base and Composer digests; APT package versions are resolved at build time.'
             echo 'The slim image is flattened and no longer shares the official base layer. Gzip savings do not predict pulls onto a node with the original base already cached.'
             echo 'Gzip archive sizes are a comparable transfer-size proxy, not registry layer sizes.'
           } | tee image-size.md
           cat image-size.md >> "$GITHUB_STEP_SUMMARY"
-          for image in baseline optimized slim; do
+          for image in baseline optimized reference slim; do
             echo "=== $image layers ==="
             docker history --human=false --format '{{.Size}} {{.CreatedBy}}' "streams/manticore:$image"
           done
@@ -125,7 +132,7 @@ jobs:
           PY
       - name: Check runtime files and dependencies as manticore
         run: |
-          for image in optimized slim; do
+          for image in optimized reference slim; do
             docker run --rm --entrypoint sh "streams/manticore:$image" -ec '
             test "$(id -u)" -ne 0
             for dir in /var/lib/manticore /var/log/manticore /var/run/manticore; do test -w "$dir"; done

@@ -5,6 +5,10 @@ tag=$(awk '/^appVersion:/ { print $2; exit }' helm-chart/Chart.yaml)
 for image_archive in ci-images/*.tar.gz; do
   gzip -dc "$image_archive" | docker load
 done
+if [ -n "${MANTICORE_REFERENCE_ARCHIVE:-}" ]; then
+  gzip -dc "$MANTICORE_REFERENCE_ARCHIVE" | docker load
+  docker tag streams/manticore:reference streams/manticore:ci
+fi
 components=(manticore scaler rules_checker worker ui ui-nginx)
 for component in "${components[@]}"; do
   docker image inspect "streams/${component}:ci" >/dev/null

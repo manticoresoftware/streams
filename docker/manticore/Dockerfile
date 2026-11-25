@@ -57,12 +57,13 @@ USER manticore:manticore
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisord.conf"]
 
 # Experimental Streams-only pruning. The official Manticore image is unchanged.
-# The bundled Manticore package also contains searchd, Galera, Buddy and backup:
-# do not purge the package or autoremove its dependencies.
+# Retain package metadata and shared dependencies. The reference profile is
+# the previous slim image; the default Streams profile prunes more features.
 FROM runtime AS prune
 USER root
+ARG PRUNE_PROFILE=streams
 COPY prune-runtime.sh /tmp/prune-runtime.sh
-RUN sh /tmp/prune-runtime.sh && rm /tmp/prune-runtime.sh
+RUN sh /tmp/prune-runtime.sh "$PRUNE_PROFILE" && rm /tmp/prune-runtime.sh
 
 # Flatten the cleaned filesystem. Merely deleting files in a descendant layer
 # would leave their bytes in the original base layer.

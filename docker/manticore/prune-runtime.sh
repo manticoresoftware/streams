@@ -2,8 +2,8 @@
 set -eu
 
 # Explicit, reviewable list. This is a Streams PQ image, not a general-purpose
-# Manticore distribution. Keep searchd, replication, Buddy, backup, MySQL,
-# language packs, ICU/Jieba, columnar, secondary indexes and KNN itself.
+# Manticore distribution. Keep searchd, Galera, executor, backup, MySQL,
+# language packs, ICU/Jieba and secondary indexes in both profiles.
 # Manticore's bundle is one package; removing these payload files intentionally
 # leaves its dpkg metadata intact. Do not upgrade packages inside this image.
 for path in \
@@ -24,3 +24,47 @@ done
 # Keep copyright notices, component licenses and the package database.
 # Manual pages and GNU info pages are not used by the runtime.
 rm -rf /usr/share/man /usr/share/info
+
+# The reference profile is the previously validated 673.5 MiB image.
+case "$1" in
+    reference) exit 0 ;;
+    streams) ;;
+    *) echo "Unknown pruning profile: $1" >&2; exit 1 ;;
+esac
+
+# Buddy is not part of the Streams query path. Keep the executor and
+# Backup unchanged, including their PHP runtime and all language data.
+# Disable Buddy explicitly instead of relying on a missing-file warning.
+sed -i '/^    network_timeout = 5/i\    buddy_path =' /etc/manticoresearch/manticore.conf
+for path in /usr/share/manticore/modules/manticore-buddy/*; do
+    case "$(basename "$path")" in
+        LICENSE*|COPYING*|NOTICE*|README*|COPYRIGHT*) continue ;;
+    esac
+    rm -rf -- "$path"
+done
+rm -f /usr/bin/manticore-buddy
+
+# The metrics store uses a separate image. Only the PQ/RT pipeline
+# image is affected; the secondary index library is retained.
+for path in \
+    /usr/share/manticore/modules/lib_manticore_columnar*.so* \
+    /usr/share/manticore/modules/lib_manticore_knn*.so*; do
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        du -sh "$path"
+        rm -f -- "$path"
+    fi
+done
+
+# Keep the SQL client, mysqldump, addr2line (searchd crash reports),
+# shared libraries, locale runtime data, and all package/license metadata.
+# Remove only the offline database/compilation utilities and locale sources.
+for tool in mysqlpump mysqlbinlog myisam_ftdump myisamchk myisamlog myisampack \
+    ar as c++filt dwp elfedit gprof gprofng ld ld.bfd ld.gold nm objcopy \
+    objdump ranlib readelf size strings strip; do
+    for path in "/usr/bin/$tool" /usr/bin/*-linux-gnu-"$tool"; do
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            rm -f -- "$path"
+        fi
+    done
+done
+rm -rf /usr/share/i18n/charmaps /usr/share/i18n/locales
