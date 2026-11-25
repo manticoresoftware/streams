@@ -164,8 +164,9 @@ func expectRealOutput(t *testing.T, counts map[int]int, first, last, copies int)
 
 func (f *realKafkaFixture) assertCommitted(t *testing.T) {
 	t.Helper()
-	// Verify that a new member of the SAME group sees no replay. It must join
-	// and be assigned before an empty poll can establish committed progress.
+	// An empty poll on an idle topic ends with context.DeadlineExceeded: it is
+	// expected, not a Kafka failure. Check the broker-fetched group offset
+	// *and* that a new member of the same group cannot replay prior records.
 	assigned := make(chan struct{})
 	consumer, err := kgo.NewClient(
 		kgo.SeedBrokers(f.brokers), kgo.ConsumerGroup(f.group),
@@ -179,23 +180,39 @@ func (f *realKafkaFixture) assertCommitted(t *testing.T) {
 	)
 	if err != nil { t.Fatal(err) }
 	defer consumer.Close()
-	until, cancel := context.WithTimeout(f.deadline, 5*time.Second)
+
+	until, cancel := context.WithTimeout(f.deadline, 8*time.Second)
 	defer cancel()
-	for {
-		fetched := consumer.PollRecords(until, 1)
-		if len(fetched.Errors()) > 0 { t.Fatalf("committed-offset poll failed: %v", fetched.Errors()) }
-		if fetched.NumRecords() != 0 { t.Fatal("previously committed input replayed") }
+	const wantOffset = int64(140)
+	var lastOffset int64 = -1
+	for until.Err() == nil {
+		// PollRecords uses the supplied context as its idle-poll deadline.
+		// Passing the overall 8s deadline to every poll would consume the
+		// entire budget before inspecting assignment or committed offsets.
+		pollCtx, stopPoll := context.WithTimeout(until, 250*time.Millisecond)
+		fetched := consumer.PollRecords(pollCtx, 1)
+		stopPoll()
+		for _, fetchErr := range fetched.Errors() {
+			if errors.Is(fetchErr.Err, context.DeadlineExceeded) || errors.Is(fetchErr.Err, context.Canceled) {
+				continue
+			}
+			t.Fatalf("committed-offset poll failed: %v", fetchErr.Err)
+		}
+		if fetched.NumRecords() != 0 {
+			t.Fatalf("previously committed input replayed: %d records", fetched.NumRecords())
+		}
 		select {
 		case <-assigned:
-			extraCtx, extraCancel := context.WithTimeout(until, 500*time.Millisecond)
-			got := consumer.PollRecords(extraCtx, 1)
-			extraCancel()
-			if got.NumRecords() != 0 || len(got.Errors()) > 0 { t.Fatalf("committed offset did not advance: %v", got) }
-			return
+			// CommittedOffsets reflects the actual offset fetched when joining
+			// the Kafka consumer group, not simply an empty result from Poll.
+			if offset, ok := consumer.CommittedOffsets()[f.input][0]; ok {
+				lastOffset = offset.Offset
+				if lastOffset == wantOffset { return }
+			}
 		default:
 		}
-		if until.Err() != nil { t.Fatalf("consumer never joined group: %v", until.Err()) }
 	}
+	t.Fatalf("group %s did not commit offset %d (last observed %d): %v", f.group, wantOffset, lastOffset, until.Err())
 }
 
 func TestRealKafkaDeliveryRecovery(t *testing.T) {
