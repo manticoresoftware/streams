@@ -20,13 +20,13 @@ func TestMalformedJaywayRuleParity(t *testing.T) {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
 				m := newMapper([]string{"before => before", tc.rule, "after => after"},
 					map[string]string{"before":"text","selected":"text","after":"text"}, mode)
-				defer m.reference.close()
-				if m.needsReference {
+				defer closeMappingOracle(m)
+				if m.hasUnsupportedRule {
 					t.Fatalf("known invalid Jayway path still needs Java: %s",tc.name)
 				}
 				mapped, output, err := m.transform(tc.input)
 				if err != nil { t.Fatal(err) }
-				if m.referenceCalls.Load() != 0 {
+				if mappingUnsupportedCount(m) != 0 {
 					t.Fatalf("Java fallback was invoked for %s",tc.name)
 				}
 				got, err := json.Marshal(mapped)

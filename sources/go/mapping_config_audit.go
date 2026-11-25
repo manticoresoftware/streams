@@ -13,7 +13,7 @@ type mappingConfigAuditProfile struct {
 	OutputMode         string                 `json:"output_mode"`
 	RuleCount          int                    `json:"rule_count"`
 	StaticNative       bool                   `json:"static_native"`
-	Unsupported        []mappingFallbackIssue `json:"unsupported,omitempty"`
+	Unsupported        []mappingCompatibilityIssue `json:"unsupported,omitempty"`
 	RuntimeParityKnown bool                   `json:"runtime_parity_known"`
 }
 
@@ -28,13 +28,12 @@ func auditMappingProfile(c config, index int) mappingConfigAuditProfile {
 		c.output = "1000"
 	}
 	m := newMapper(c.rules, c.fields, c.output)
-	defer m.reference.close()
 	return mappingConfigAuditProfile{
 		ProfileIndex:       index,
 		OutputMode:         c.output,
 		RuleCount:          len(c.rules),
-		StaticNative:       !m.needsReference,
-		Unsupported:        m.fallbackAudit.snapshot().CompileIssues,
+		StaticNative:       !m.hasUnsupportedRule,
+		Unsupported:        m.audit.snapshot().CompileIssues,
 		RuntimeParityKnown: false,
 	}
 }

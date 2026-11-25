@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -49,11 +47,10 @@ type mappingPath struct {
 type mapper struct {
 	rules                  []mappingRule
 	output                 string
-	reference              *referenceProcess
-	referenceCalls         atomic.Uint64
-	needsReference         bool
+	configJSON             string // original configuration for offline differential tests
+	hasUnsupportedRule     bool
 	passThroughWithoutRule bool
-	fallbackAudit          mappingFallbackAudit
+	audit                  mappingCompatibilityAudit
 }
 
 var simpleKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -252,7 +249,7 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 		Fields map[string]string `json:"fields"`
 		Output string            `json:"output"`
 	}{rules, fields, output})
-	m := &mapper{output: output, reference: javaReference("map", string(cfg)), passThroughWithoutRule: rules == nil}
+	m := &mapper{output: output, configJSON: string(cfg), passThroughWithoutRule: rules == nil}
 	for ruleIndex, rule := range rules {
 		parts := strings.Split(rule, "=>")
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
@@ -335,8 +332,8 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 				}
 			}
 			if !ok {
-				m.needsReference = true
-				m.fallbackAudit.addCompileIssue(ruleIndex, pathIndex)
+				m.hasUnsupportedRule = true
+				m.audit.addCompileIssue(ruleIndex, pathIndex)
 			}
 			r.paths = append(r.paths, p)
 		}
@@ -346,29 +343,11 @@ func newMapper(rules []string, fields map[string]string, output string) *mapper 
 }
 
 func (m *mapper) requireNativeSupport() error {
-	if os.Getenv("STREAMS_NATIVE_ONLY") == "1" && m.needsReference {
-		return fmt.Errorf("configured JSON mapping requires the Java compatibility bridge; use the hybrid worker image")
+	if m.hasUnsupportedRule {
+		issue := m.audit.firstCompileIssue()
+		return fmt.Errorf("unsupported mapping rule %d path %d in Go-only worker", issue.RuleIndex, issue.PathIndex)
 	}
 	return nil
-}
-
-func (m *mapper) referenceMap(raw string) (any, string, error) {
-	m.referenceCalls.Add(1)
-	if os.Getenv("STREAMS_NATIVE_ONLY") == "1" {
-		return nil, "", fmt.Errorf("document requires unsupported Java mapping compatibility; use the hybrid worker image")
-	}
-	data, err := m.reference.call(raw)
-	if err != nil {
-		return nil, "", err
-	}
-	var pair struct {
-		Mapped json.RawMessage `json:"mapped"`
-		Output string          `json:"output"`
-	}
-	if err := json.Unmarshal([]byte(data), &pair); err != nil {
-		return nil, "", err
-	}
-	return pair.Mapped, pair.Output, nil
 }
 
 func lookupMappedPath(value any, keys []string) (any, bool) {
@@ -649,9 +628,9 @@ func (m *mapper) abortMapping(raw string, mapped, output map[string]any) (any, s
 }
 
 func (m *mapper) transform(raw string) (any, string, error) {
-	if m.needsReference {
-		issue := m.fallbackAudit.firstCompileIssue()
-		return m.fallbackMap(raw, mappingFallbackUnsupportedRule, issue.RuleIndex, issue.PathIndex)
+	if m.hasUnsupportedRule {
+		issue := m.audit.firstCompileIssue()
+		return m.unsupportedMapping(mappingCompatUnsupportedRule, issue.RuleIndex, issue.PathIndex)
 	}
 	if m.passThroughWithoutRule {
 		return json.RawMessage(raw), "null", nil
@@ -778,7 +757,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 							return m.abortMapping(originalOutput, mapped, out)
 						}
 						if !mapURLs(s, rule.target, mapped) {
-							return m.fallbackMap(originalInput, mappingFallbackURL, rule.sourceIndex, pathIndex)
+							return m.unsupportedMapping(mappingCompatURL, rule.sourceIndex, pathIndex)
 						}
 					}
 					value = ""
@@ -859,7 +838,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 						return m.abortMapping(originalOutput, mapped, out)
 					}
 					if !mapURLs(s, rule.target, mapped) {
-						return m.fallbackMap(originalInput, mappingFallbackURL, rule.sourceIndex, pathIndex)
+						return m.unsupportedMapping(mappingCompatURL, rule.sourceIndex, pathIndex)
 					}
 				}
 				value = ""
@@ -909,7 +888,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 				text, found, compatible = selectRawWildcard(raw, keys, path.wildcard)
 			}
 			if !compatible {
-				return m.fallbackMap(originalInput, mappingFallbackValue, rule.sourceIndex, pathIndex)
+				return m.unsupportedMapping(mappingCompatValue, rule.sourceIndex, pathIndex)
 			}
 			if !found {
 				continue
@@ -920,7 +899,7 @@ func (m *mapper) transform(raw string) (any, string, error) {
 			value += text
 			if rename {
 				if err := deleteMappedSelection(out, path, keys); err != nil {
-					return m.fallbackMap(originalInput, mappingFallbackRename, rule.sourceIndex, pathIndex)
+					return m.unsupportedMapping(mappingCompatRename, rule.sourceIndex, pathIndex)
 				}
 			}
 		}

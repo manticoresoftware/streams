@@ -29,10 +29,10 @@ func TestLegacyURLSelectorParity(t *testing.T) {
             t.Run(mode+"/"+tc.name,func(t *testing.T) {
                 m:=newMapper([]string{"before => before",tc.path+" => url","after => after"},
                     map[string]string{"before":"text","url":"url","after":"text"},mode)
-                defer m.reference.close()
-                if m.needsReference {t.Fatalf("requires Java at startup: %q",tc.path)}
+                defer closeMappingOracle(m)
+                if m.hasUnsupportedRule {t.Fatalf("requires Java at startup: %q",tc.path)}
                 mapped,out,err:=m.transform(raw)
-                if m.referenceCalls.Load()!=0 {t.Fatalf("Java fallback for %q",tc.path)}
+                if mappingUnsupportedCount(m)!=0 {t.Fatalf("Java fallback for %q",tc.path)}
                 wantMapped,wantOut,refErr:=m.referenceMap(raw)
                 if (err!=nil)!=(refErr!=nil) {t.Fatalf("Go error %v; Java error %v",err,refErr)}
                 if err!=nil {return}
@@ -62,10 +62,10 @@ func TestLegacyQuotedWildcardArrayParity(t *testing.T) {
         for _,tc:=range cases{
             t.Run(mode+"/"+tc.name,func(t *testing.T){
                 m:=newMapper([]string{"['foo[*]'] => selected"},map[string]string{"selected":"text"},mode)
-                defer m.reference.close()
-                if m.needsReference {t.Fatal("requires Java at startup")}
+                defer closeMappingOracle(m)
+                if m.hasUnsupportedRule {t.Fatal("requires Java at startup")}
                 mapped,out,err:=m.transform(tc.raw)
-                if m.referenceCalls.Load()!=0 {t.Fatal("Java fallback")}
+                if mappingUnsupportedCount(m)!=0 {t.Fatal("Java fallback")}
                 wantMapped,wantOut,refErr:=m.referenceMap(tc.raw)
                 if (err!=nil)!=(refErr!=nil) {t.Fatalf("Go %v / Java %v",err,refErr)}
                 if err!=nil{return}

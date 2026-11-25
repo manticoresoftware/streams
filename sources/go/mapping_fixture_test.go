@@ -53,7 +53,7 @@ func TestFixtureMappingFallbacks(t *testing.T) {
 	}
 
 	m := newFixtureMapper()
-	defer m.reference.close()
+	defer closeMappingOracle(m)
 
 	scanner := bufio.NewScanner(records)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
@@ -62,12 +62,12 @@ func TestFixtureMappingFallbacks(t *testing.T) {
 	for scanner.Scan() {
 		count++
 		raw := scanner.Text()
-		before := m.referenceCalls.Load()
+		before := mappingUnsupportedCount(m)
 		mapped, output, err := m.transform(raw)
 		if err != nil {
 			t.Fatalf("mapping fixture record %d: %v", count, err)
 		}
-		if m.referenceCalls.Load() != before {
+		if mappingUnsupportedCount(m) != before {
 			fallbackOffsets = append(fallbackOffsets, count)
 		}
 		// Compare *every* document in the small-batch benchmark corpus with

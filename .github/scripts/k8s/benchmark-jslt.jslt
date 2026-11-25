@@ -1,6 +1,0 @@
-{
-  "id": .id,
-  "matching_queries": .matching_queries,
-  "clean": replace("one <b>two</b> three", "<[^>]+>", ""),
-  "url_path": parse-url("https://example.org/article?q=1").pathname
-}

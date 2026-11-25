@@ -21,8 +21,8 @@ type mappingAuditResult struct {
 	Shape         string                 `json:"shape"`
 	OutputMode    string                 `json:"output_mode"`
 	Classification string                `json:"classification"`
-	Reasons       []mappingFallbackIssue `json:"reasons,omitempty"`
-	CompileIssues []mappingFallbackIssue `json:"compile_issues,omitempty"`
+	Reasons       []mappingCompatibilityIssue `json:"reasons,omitempty"`
+	CompileIssues []mappingCompatibilityIssue `json:"compile_issues,omitempty"`
 	Equivalent    bool                   `json:"equivalent"`
 	GoError       bool                   `json:"go_error"`
 	JavaError     bool                   `json:"java_error"`
@@ -31,9 +31,9 @@ type mappingAuditResult struct {
 type mappingAuditTotals struct {
 	Cases          int            `json:"cases"`
 	Native         int            `json:"native"`
-	JavaFallback   int            `json:"java_fallback"`
+	Unsupported    int            `json:"unsupported"`
 	Mismatches     int            `json:"mismatches"`
-	FallbackReason map[string]int `json:"fallback_reasons"`
+	UnsupportedReason map[string]int `json:"unsupported_reasons"`
 }
 
 type mappingAuditReport struct {
@@ -84,49 +84,49 @@ func mappingGoldenDigest(mapped any, output string) (string, error) {
 }
 
 
-func TestMappingFallbackAuditInstrumentation(t *testing.T) {
+func TestMappingCompatibilityErrors(t *testing.T) {
 	t.Setenv("STREAMS_NATIVE_ONLY", "1")
 	m := newMapper([]string{
 		"before => before",
 		"connection.{kind!bang}.code => selected",
 	}, map[string]string{"before": "text", "selected": "text"}, "1000")
-	defer m.reference.close()
-	if !m.needsReference {
+	defer closeMappingOracle(m)
+	if !m.hasUnsupportedRule {
 		t.Fatal("expected a statically unsupported mapping rule")
 	}
 	_, _, err := m.transform(`{"before":"yes"}`)
 	if err == nil {
 		t.Fatal("strict native mode must reject the unsupported rule")
 	}
-	if m.reference.cmd != nil {
+	if mappingOracleStarted(m) {
 		t.Fatal("audit started Java in strict native mode")
 	}
-	summary := m.fallbackAudit.snapshot()
-	if summary.Counts[mappingFallbackUnsupportedRule] != 1 ||
+	summary := m.audit.snapshot()
+	if summary.Counts[mappingCompatUnsupportedRule] != 1 ||
 		len(summary.CompileIssues) != 1 ||
 		summary.CompileIssues[0].RuleIndex != 1 ||
 		summary.CompileIssues[0].PathIndex != 0 {
-		t.Fatalf("incorrect fallback attribution: %+v", summary)
+		t.Fatalf("incorrect mapping error attribution: %+v", summary)
 	}
-	for i := 0; i < mappingFallbackSampleLimit+5; i++ {
-		m.fallbackAudit.record(mappingFallbackValue, 0, 0)
+	for i := 0; i < mappingCompatibilitySampleLimit+5; i++ {
+		m.audit.record(mappingCompatValue, 0, 0)
 	}
-	summary = m.fallbackAudit.snapshot()
-	if len(summary.Samples) != mappingFallbackSampleLimit ||
-		summary.Counts[mappingFallbackValue] != uint64(mappingFallbackSampleLimit+5) {
-		t.Fatalf("fallback samples are not bounded: %+v", summary)
+	summary = m.audit.snapshot()
+	if len(summary.Samples) != mappingCompatibilitySampleLimit ||
+		summary.Counts[mappingCompatValue] != uint64(mappingCompatibilitySampleLimit+5) {
+		t.Fatalf("mapping error samples are not bounded: %+v", summary)
 	}
 
 	native := newMapper([]string{"before => before"}, map[string]string{"before": "text"}, "1000")
-	defer native.reference.close()
+	defer closeMappingOracle(native)
 	if native.requireNativeSupport() != nil {
-		t.Fatal("valid rule needs Java")
+		t.Fatal("valid rule was marked unsupported")
 	}
 	if _, _, err := native.transform(`{"before":"yes"}`); err != nil {
 		t.Fatal(err)
 	}
-	if len(native.fallbackAudit.snapshot().Samples) != 0 {
-		t.Fatal("native mapping falsely recorded a fallback")
+	if len(native.audit.snapshot().Samples) != 0 {
+		t.Fatal("native mapping falsely recorded a compatibility error")
 	}
 }
 
@@ -183,7 +183,7 @@ func syntheticMappingCases() []mappingAuditScenario {
 	}
 }
 
-func TestMappingFallbackAudit(t *testing.T) {
+func TestJavaGoMappingAudit(t *testing.T) {
 	if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" {
 		t.Skip("requires original Java mapping implementation as oracle")
 	}
@@ -191,7 +191,7 @@ func TestMappingFallbackAudit(t *testing.T) {
 	report := mappingAuditReport{
 		SchemaVersion: 1,
 		Source: "synthetic-java-vs-go",
-		Totals: mappingAuditTotals{FallbackReason: make(map[string]int)},
+		Totals: mappingAuditTotals{UnsupportedReason: make(map[string]int)},
 	}
 	golden := mappingGoldenSnapshot{SchemaVersion: 1, Oracle: "streams-legacy-java-2026", Cases: make([]mappingGoldenOutcome, 0, len(cases)*len(legacyMappingOutputModes))}
 	for _, tc := range cases {
@@ -200,9 +200,9 @@ func TestMappingFallbackAudit(t *testing.T) {
 			rules := []string{"before => before", tc.path+" => selected", "after => after"}
 			m := newMapper(rules, fields, mode)
 			mapped, output, goErr := m.transform(tc.input)
-			metrics := m.fallbackAudit.snapshot()
+			metrics := m.audit.snapshot()
 			wantMapped, wantOutput, javaErr := m.referenceMap(tc.input)
-			m.reference.close()
+			closeMappingOracle(m)
 			goldenCase := mappingGoldenOutcome{Scenario: tc.name, Mode: mode, JavaError: javaErr != nil}
 			if javaErr == nil {
 				var digestErr error
@@ -232,10 +232,10 @@ func TestMappingFallbackAudit(t *testing.T) {
 			}
 			report.Totals.Cases++
 			if len(metrics.Samples) != 0 {
-				item.Classification = "java_fallback"
-				report.Totals.JavaFallback++
+				item.Classification = "unsupported"
+				report.Totals.Unsupported++
 				for reason, count := range metrics.Counts {
-					report.Totals.FallbackReason[string(reason)] += int(count)
+					report.Totals.UnsupportedReason[string(reason)] += int(count)
 				}
 			} else {
 				report.Totals.Native++
@@ -264,13 +264,13 @@ func TestMappingFallbackAudit(t *testing.T) {
 		if err != nil { t.Fatal(err) }
 		if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil { t.Fatal(err) }
 	}
-	t.Logf("synthetic fallback audit: %d cases, %d native, %d Java fallbacks, %d mismatches; reasons=%v",
-		report.Totals.Cases, report.Totals.Native, report.Totals.JavaFallback,
-		report.Totals.Mismatches, report.Totals.FallbackReason)
+	t.Logf("synthetic native mapping audit: %d cases, %d native, %d unsupported, %d mismatches; reasons=%v",
+		report.Totals.Cases, report.Totals.Native, report.Totals.Unsupported,
+		report.Totals.Mismatches, report.Totals.UnsupportedReason)
 	if report.Totals.Mismatches != 0 {
 		t.Fatalf("Go and Java disagree in %d synthetic audit cases; inspect the audit artifact", report.Totals.Mismatches)
 	}
-	if report.Totals.JavaFallback != 0 {
-		t.Fatalf("%d synthetic audit cases still require the Java bridge; inspect the audit artifact", report.Totals.JavaFallback)
+	if report.Totals.Unsupported != 0 {
+		t.Fatalf("%d synthetic audit cases could not be mapped natively; inspect the audit artifact", report.Totals.Unsupported)
 	}
 }

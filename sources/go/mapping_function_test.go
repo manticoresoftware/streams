@@ -66,12 +66,12 @@ func TestLegacyTerminalFunctionParity(t *testing.T) {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
 				m := newMapper([]string{"before => before", tc.path+" => selected", "after => after"},
 					map[string]string{"before":"text","selected":tc.fieldType,"after":"text"}, mode)
-				defer m.reference.close()
-				if m.needsReference {
+				defer closeMappingOracle(m)
+				if m.hasUnsupportedRule {
 					t.Fatalf("function path %q still needs Java at startup",tc.path)
 				}
 				mapped, output, goErr := m.transform(tc.raw)
-				if m.referenceCalls.Load() != 0 {
+				if mappingUnsupportedCount(m) != 0 {
 					t.Fatalf("function path %q invoked Java in Go transform",tc.path)
 				}
 				if os.Getenv("STREAMS_COMPAT_CLASSPATH") == "" || os.Getenv("STREAMS_NATIVE_ONLY") == "1" {

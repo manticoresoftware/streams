@@ -20,8 +20,8 @@ func TestAdvancedObjectWildcardOrderParity(t *testing.T) {
 		for _, mode := range []string{"1000", "0100", "1010", "0010"} {
 			t.Run(rule+"/"+mode, func(t *testing.T) {
 				m := newMapper([]string{rule}, map[string]string{"selected":"text"}, mode)
-				defer m.reference.close()
-				if m.needsReference { t.Fatal("native compilation failed") }
+				defer closeMappingOracle(m)
+				if m.hasUnsupportedRule { t.Fatal("native compilation failed") }
 				wantMapped, wantOutput, err := m.referenceMap(input)
 				if err != nil { t.Fatal(err) }
 				oracle, err := json.Marshal(wantMapped)
@@ -32,10 +32,10 @@ func TestAdvancedObjectWildcardOrderParity(t *testing.T) {
 					t.Fatalf("Java did not produce a selection for %q: %s", rule, oracle)
 				}
 				for run := 0; run < 12; run++ {
-					previous := m.referenceCalls.Load()
+					previous := mappingUnsupportedCount(m)
 					mapped, output, err := m.transform(input)
 					if err != nil { t.Fatal(err) }
-					if m.referenceCalls.Load() != previous { t.Fatal("runtime Java fallback") }
+					if mappingUnsupportedCount(m) != previous { t.Fatal("runtime Java fallback") }
 					got, err := json.Marshal(mapped)
 					if err != nil { t.Fatal(err) }
 					if !sameFixtureJSON(string(got), string(oracle)) ||

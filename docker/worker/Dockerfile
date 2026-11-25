@@ -10,56 +10,9 @@ RUN curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bu
 FROM go-build AS go-test
 RUN CGO_ENABLED=0 go test -c -o /worker.test .
 
-FROM maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS compat-build
-WORKDIR /build
-COPY sources/src/pom.xml ./
-COPY sources/src/src/main src/main
-# Use the exact assembly plugin coordinates and force Maven to recheck
-# previously cached transient 404/429 failures on retry (-U).
-RUN set -eu; \
-    for attempt in 1 2 3; do \
-      if mvn -B -q -U -Dmaven.wagon.http.retryHandler.count=3 compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single; then \
-        break; \
-      fi; \
-      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
-      echo "Transient Maven failure while assembling Java compatibility JAR; retrying" >&2; \
-      sleep 5; \
-    done; \
-    cp target/*-jar-with-dependencies.jar /KafkaHandler.jar
-COPY sources/go/compat/StreamsCompat.java /tmp/StreamsCompat.java
-RUN mkdir /compat && javac -cp /KafkaHandler.jar -d /compat /tmp/StreamsCompat.java
-
-# Audit-only stage: not copied into either deployed worker image.
-FROM compat-build AS compat-audit-build
-COPY sources/go/compat/KafkaAuditSampler.java /tmp/KafkaAuditSampler.java
-RUN javac -cp /KafkaHandler.jar -d /compat /tmp/KafkaAuditSampler.java \
-    && java -cp /compat:/KafkaHandler.jar KafkaAuditSampler --self-test
-
-FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2 AS compat-test
-
-# PHP is only needed in the build-time parity test; it is not in the worker image.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends wget \
-    && wget -qO /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb \
-    && dpkg -i /tmp/debsuryorg-archive-keyring.deb && rm /tmp/debsuryorg-archive-keyring.deb \
-    && . /etc/os-release \
-    && echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/php.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends php8.5-cli php8.5-mbstring \
-    && php -r 'if (PHP_VERSION_ID < 80513 || PHP_VERSION_ID >= 80600) exit(1);' \
-    && rm -rf /var/lib/apt/lists/*
-COPY --from=compat-build /KafkaHandler.jar /KafkaHandler.jar
-COPY --from=compat-build /compat /compat
-COPY --from=go-build /build/jslt-bundle.js /usr/src/myapp/jslt-bundle.js
-ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
-RUN --mount=type=bind,from=go-test,source=/worker.test,target=/tmp/worker.test \
-    STREAMS_COMPAT_CLASSPATH=/compat:/KafkaHandler.jar \
-    STREAMS_TEST_MBSTRING=1 /tmp/worker.test -test.v -test.run '^(TestReferenceTransforms|TestPHPUnicodeParity)$'
-
-# CI-only JVM-free candidate. Keep the hybrid image below as the
-# deployment default until unsupported mapping rules are ported.
+# The deployed image contains only the native worker, the JSLT bundle, and
+# its license. The Java reference implementation is used by CI, not shipped.
 FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS native-runtime
-ENV STREAMS_NATIVE_ONLY=1
 RUN apk add --no-cache ca-certificates \
     && addgroup -S worker \
     && adduser -S -G worker worker
@@ -68,32 +21,20 @@ COPY --from=go-build /streams-worker ./streams-worker
 COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
 COPY docker/worker/check.sh ./
 COPY sources/go/LICENSE.jslt-js ./LICENSE.jslt-js
+ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
 USER worker
 ENTRYPOINT ["/usr/src/myapp/streams-worker"]
 
-# Execute a timezone/JSLT smoke test in the actual Alpine filesystem,
-# which deliberately has neither a JRE nor a system tzdata package.
+# CI-only: verify native mapping/JSLT inside the actual Alpine filesystem.
 FROM native-runtime AS native-test
 COPY --from=go-test /worker.test /worker.test
-# The frozen synthetic Java outputs are checked in the JVM-free image.
 COPY --chown=worker:worker sources/go/testdata/ ./testdata/
-ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
 RUN /usr/src/myapp/streams-worker --audit-mapping | grep -q '"static_native":true'
 RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestJSLTParseTimePrefixNative|TestJSLTReplaceRegexCacheParity|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestNativeScalarWildcardInputs|TestStrictNativeMapper|TestStrictNativeMalformedDocuments|TestStrictNativeNonObjectRoots|TestStrictNativeNestedDuplicateKeys|TestURLHashGolden|TestNativeLowercase|TestLegacyTerminalFunctionParity|TestFrozenJavaMappingGolden|TestAuditWorkerMapping)$"]
 
-# Opt-in CI-only real Kafka recovery tests (never deployed as a worker).
+# CI-only: broker-backed replay/commit fault tests, never deployed as a worker.
 FROM native-runtime AS real-kafka-test
 COPY --from=go-test /worker.test /worker.test
-ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
 
-FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
-RUN groupadd -r worker && useradd -r -g worker worker
-WORKDIR /usr/src/myapp
-COPY --from=compat-test /KafkaHandler.jar ./
-COPY --from=compat-test /compat ./compat
-COPY --from=go-build /streams-worker ./
-COPY --from=go-build /build/jslt-bundle.js ./jslt-bundle.js
-COPY docker/worker/check.sh ./
-COPY sources/go/LICENSE.jslt-js ./LICENSE.jslt-js
-USER worker
-ENTRYPOINT ["/usr/src/myapp/streams-worker"]
+# Default image for deployment and staging: identical to native-runtime.
+FROM native-runtime

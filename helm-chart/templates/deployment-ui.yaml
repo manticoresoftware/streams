@@ -81,6 +81,8 @@ spec:
             subPath: process.json
             readOnly: true
         env:
+          - name: TRUSTED_PROXIES
+            value: {{ .Values.ui.trustedProxies | default (list) | join "," | quote }}
           - name: DB_HOST
             value: "{{ include "manticore-streams.fullname" . }}-mysql-service"
           - name: DB_DATABASE

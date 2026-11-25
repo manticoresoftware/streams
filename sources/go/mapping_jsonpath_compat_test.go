@@ -45,10 +45,10 @@ func TestLegacyJSONPathParity(t *testing.T) {
             t.Run(mode+"/"+tc.name, func(t *testing.T) {
                 m := newMapper([]string{"before => before", tc.path+" => selected", "after => after"},
                    map[string]string{"before":"text","selected":"text","after":"text"}, mode)
-                defer m.reference.close()
-                if m.needsReference { t.Fatalf("path %q still requires Java at startup", tc.path) }
+                defer closeMappingOracle(m)
+                if m.hasUnsupportedRule { t.Fatalf("path %q still requires Java at startup", tc.path) }
                 mapped, out, err := m.transform(raw)
-                if m.referenceCalls.Load() != 0 { t.Fatalf("path %q fell back to Java", tc.path) }
+                if mappingUnsupportedCount(m) != 0 { t.Fatalf("path %q fell back to Java", tc.path) }
                 wantMapped, wantOutput, javaErr := m.referenceMap(raw)
                 if (err != nil) != (javaErr != nil) {
                     t.Fatalf("Go err=%v, Java err=%v", err, javaErr)

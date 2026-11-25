@@ -46,7 +46,7 @@ func TestNativeMappingAndOutput(t *testing.T) {
 	b, _ := json.Marshal(v)
 	assertSameJSON(t, string(b), `{"id":"http\nOne\nTwo\n","code":"200","empty":"null","all":`+raw+`}`)
 	assertSameJSON(t, out, raw)
-	if m.reference.cmd != nil {
+	if mappingOracleStarted(m) {
 		t.Fatal("ordinary mapping unexpectedly started a Java process")
 	}
 
@@ -67,12 +67,12 @@ func TestNativeMappingAndOutput(t *testing.T) {
 // Object-valued wildcards must produce a result without starting Java.
 func TestNativeObjectWildcardValues(t *testing.T) {
 	m := newMapper([]string{"items[*].name => selected"}, map[string]string{"selected":"text"}, "1000")
-	defer m.reference.close()
+	defer closeMappingOracle(m)
 	_, out, err := m.transform(`{"items":{"first":{"name":"One"},"second":{"name":"Two"}}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.reference.cmd != nil {
+	if mappingOracleStarted(m) {
 		t.Fatal("object wildcard unexpectedly started Java")
 	}
 	assertSameJSON(t, out, `{"selected":"One\nTwo\n"}`)
@@ -92,7 +92,7 @@ func TestStrictNativeNestedDuplicateKeys(t *testing.T) {
 		_, output, err := m.transform(tc.doc)
 		if err != nil { t.Fatalf("%s: %v", tc.path, err) }
 		if !json.Valid([]byte(output)) { t.Fatalf("%s: invalid output %s", tc.path, output) }
-		if m.reference.cmd != nil { t.Fatal("native-only mapping started Java") }
+		if mappingOracleStarted(m) { t.Fatal("native-only mapping started Java") }
 	}
 }
 
@@ -110,7 +110,7 @@ func TestNativeExponentDynamicSelectors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m.reference.cmd != nil {
+		if mappingOracleStarted(m) {
 			t.Fatalf("selector %s unexpectedly started Java", tc.value)
 		}
 		assertSameJSON(t, out, `{"selected":"yes"}`)
@@ -133,7 +133,7 @@ func TestNativeJavaNumberSerialization(t *testing.T) {
 				t.Fatalf("mode %s: output %s lacks numeric form %s",tc.mode,output,expected)
 			}
 		}
-		if m.reference.cmd != nil {
+		if mappingOracleStarted(m) {
 			t.Fatalf("mode %s unexpectedly started Java",tc.mode)
 		}
 	}
@@ -150,7 +150,7 @@ func TestNativeJavaNumberSerialization(t *testing.T) {
 		!strings.Contains(output, `"number":2.5e1`) {
 		t.Fatalf("whole_document numeric forms: mapped=%s output=%s", encoded, output)
 	}
-	if m.reference.cmd != nil {
+	if mappingOracleStarted(m) {
 		t.Fatal("whole_document unexpectedly started Java")
 	}
 }
@@ -171,7 +171,7 @@ func TestNativeScalarWildcardInputs(t *testing.T) {
 			if _, _, err := m.transform(raw); err != nil {
 				t.Fatalf("mode %s: %v", mode, err)
 			}
-			if m.reference.cmd != nil {
+			if mappingOracleStarted(m) {
 				t.Fatalf("mode %s unexpectedly started Java", mode)
 			}
 		}
@@ -228,12 +228,12 @@ func TestStrictNativeMapper(t *testing.T) {
 	} else {
 		assertSameJSON(t, output, `{}`)
 	}
-	defer unsupported.reference.close()
-	if unsupported.reference.cmd != nil {
+	defer closeMappingOracle(unsupported)
+	if mappingOracleStarted(unsupported) {
 		t.Fatal("strict native mode started Java while validating configuration")
 	}
 	mapper := newMapper([]string{"connection.{kind}.code => selected"}, map[string]string{"selected": "text"}, "1000")
-	defer mapper.reference.close()
+	defer closeMappingOracle(mapper)
 	if err := mapper.requireNativeSupport(); err != nil {
 		t.Fatal(err)
 	}
@@ -242,11 +242,11 @@ func TestStrictNativeMapper(t *testing.T) {
 		t.Fatalf("native object-valued dynamic selector failed: %v", err)
 	}
 	assertSameJSON(t, output, `{}`)
-	if mapper.reference.cmd != nil {
+	if mappingOracleStarted(mapper) {
 		t.Fatal("strict native mode unexpectedly started Java")
 	}
 	ordinary := newMapper([]string{"title => title"}, map[string]string{"title": "text"}, "1000")
-	defer ordinary.reference.close()
+	defer closeMappingOracle(ordinary)
 	if err := ordinary.requireNativeSupport(); err != nil {
 		t.Fatal(err)
 	}
@@ -278,20 +278,20 @@ func TestReferenceTransforms(t *testing.T) {
 	}
 	complex := newMapper([]string{"groups[*].people[?(@.active == true)].name => selected", "['user.name'] => name"},
 		map[string]string{"selected": "text", "name": "text"}, "1000")
-	if complex.needsReference {
+	if complex.hasUnsupportedRule {
 		t.Fatal("advanced paths should use native JSONPath")
 	}
 	_, got, err := complex.transform(`{"user.name":"reader","groups":[{"people":[{"name":"Eve","active":true},{"name":"Bob","active":false}]}]}`)
-	if complex.reference.cmd != nil {
+	if mappingOracleStarted(complex) {
 		t.Fatal("advanced JSONPath unexpectedly started Java")
 	}
-	defer complex.reference.close()
+	defer closeMappingOracle(complex)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertSameJSON(t, got, `{"name":"reader","selected":"Eve\n"}`)
 	links := newMapper([]string{"body => url"}, map[string]string{"url": "url"}, "1000")
-	defer links.reference.close()
+	defer closeMappingOracle(links)
 	// Compare the output and the document sent to CALL PQ with the
 	// original worker, rather than only checking the selected fields.
 	for _, tc := range []struct {
@@ -671,16 +671,16 @@ func TestReferenceTransforms(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newMapper(tc.rules, tc.fields, tc.mode)
-			defer m.reference.close()
-			if m.needsReference {
+			defer closeMappingOracle(m)
+			if m.hasUnsupportedRule {
 				t.Fatal("mapping still requires the Java fallback")
 			}
 			gotMapped, got, err := m.transform(tc.raw)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (m.reference.cmd != nil) != tc.needsJava {
-				t.Fatalf("unexpected Java fallback: started=%t, expected=%t", m.reference.cmd != nil, tc.needsJava)
+			if (mappingOracleStarted(m)) != tc.needsJava {
+				t.Fatalf("unexpected Java fallback: started=%t, expected=%t", mappingOracleStarted(m), tc.needsJava)
 			}
 			wantMapped, want, err := m.referenceMap(tc.raw)
 			if err != nil {
@@ -711,9 +711,9 @@ func TestReferenceTransforms(t *testing.T) {
 		"http://tieba.baidu.com/f?kw=%C1%F5%C7%AB", "www.example.com/path?x=a%26b#",
 	} {
 		doc, _ := json.Marshal(map[string]string{"body": link})
-		links.reference.close() // Ensure the mapper does not silently start Java.
+		closeMappingOracle(links) // Ensure the mapper does not silently start Java.
 		_, native, err := links.transform(string(doc))
-		if links.reference.cmd != nil {
+		if mappingOracleStarted(links) {
 			t.Fatalf("native URL mapping started the Java fallback for %q", link)
 		}
 		if err != nil {
@@ -776,13 +776,13 @@ func TestReferenceTransforms(t *testing.T) {
  		for _, mode := range []string{"1000","0100","1010","0010"} {
  			t.Run(rules.name+"/"+mode,func(t *testing.T) {
  				m := newMapper(rules.rules,rules.fields,mode)
- 				defer m.reference.close()
+ 				defer closeMappingOracle(m)
  				fallbackNames := make([]string, 0)
  				for _,tc := range inputs {
  					t.Run(tc.name,func(t *testing.T) {
- 						before := m.referenceCalls.Load()
+ 						before := mappingUnsupportedCount(m)
  						mapped,output,err := m.transform(tc.raw)
- 						if m.referenceCalls.Load() > before {
+ 						if mappingUnsupportedCount(m) > before {
  							fallbackNames = append(fallbackNames, tc.name)
  						}
  						wantMapped,wantOutput,referenceErr := m.referenceMap(tc.raw)
@@ -841,12 +841,12 @@ func TestStrictNativeMalformedDocuments(t *testing.T) {
 		} {
 			t.Run(mode+"/"+strconv.Quote(tc.raw),func(t *testing.T) {
 				m := newMapper([]string{"title => title"}, map[string]string{"title":"text"}, mode)
-				defer m.reference.close()
+				defer closeMappingOracle(m)
 				_, _, err := m.transform(tc.raw)
 				if (err != nil) != tc.fails {
 					t.Fatalf("mode %s: expected error=%t, got %v", mode, tc.fails, err)
 				}
-				if m.reference.cmd != nil || m.referenceCalls.Load() != 0 {
+				if mappingOracleStarted(m) || mappingUnsupportedCount(m) != 0 {
 					t.Fatal("native-only mapping launched Java")
 				}
 			})
@@ -886,12 +886,12 @@ func TestLegacyJSONRootParity(t *testing.T) {
 		for _, mode := range []string{"1000", "0100", "1010", "0010", "0011"} {
 			t.Run(ruleset.name+"/"+mode, func(t *testing.T) {
 				m := newMapper(ruleset.rules, ruleset.fields, mode)
-				defer m.reference.close()
+				defer closeMappingOracle(m)
 				for _, document := range documents {
 					t.Run(document.name,func(t *testing.T) {
-						count := m.referenceCalls.Load()
+						count := mappingUnsupportedCount(m)
 						gotMapped,gotOutput,gotErr := m.transform(document.raw)
-						if m.referenceCalls.Load() != count {
+						if mappingUnsupportedCount(m) != count {
 							t.Fatal("native mapper called Java for input shape")
 						}
 						wantMapped,wantOutput,javaErr := m.referenceMap(document.raw)
@@ -941,13 +941,13 @@ func TestUnicodeLiteralMappingParity(t *testing.T) {
 		for _,mode := range []string{"1000","0100","1010","0010"} {
 			t.Run(tc.name+"/"+mode,func(t *testing.T) {
 				m := newMapper([]string{tc.rule},map[string]string{"selected":tc.fieldType},mode)
-				defer m.reference.close()
-				if m.needsReference {
+				defer closeMappingOracle(m)
+				if m.hasUnsupportedRule {
 					t.Fatal("Unicode literal key incorrectly requires Java")
 				}
 				gotMapped,gotOutput,err := m.transform(tc.input)
 				if err != nil { t.Fatal(err) }
-				if m.reference.cmd != nil {
+				if mappingOracleStarted(m) {
 					t.Fatal("native Unicode mapping started Java")
 				}
 				wantMapped,wantOutput,err := m.referenceMap(tc.input)

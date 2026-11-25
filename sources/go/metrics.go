@@ -34,7 +34,6 @@ type metrics struct {
 	input, matched, sent, cpu           prometheus.Histogram
 	ram, kafkaLag, batchSize, ruleCount prometheus.Gauge
 	offset                              prometheus.Counter
-	fallbackTotal                       *prometheus.CounterVec
 	mu                                  sync.Mutex
 	position, backlog                   int64
 	haveLag                             bool
@@ -76,23 +75,7 @@ func newMetrics(c config, start time.Time) *metrics {
 	m.kafkaLag = gauge("kafka_lag", "Kafka lag.", kafkaLabels)
 	m.offset = prometheus.NewCounter(prometheus.CounterOpts{Name: "kafka_offset_total", Help: "Kafka offset.", ConstLabels: kafkaLabels})
 	m.registry.MustRegister(m.offset)
-	m.fallbackTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "worker_mapping_java_fallback_total",
-		Help: "Documents that required Java mapping compatibility, by reason (no payload or rule labels).",
-		ConstLabels: labels,
-	}, []string{"reason"})
-	m.registry.MustRegister(m.fallbackTotal)
-	for _, reason := range []mappingFallbackReason{
-		mappingFallbackUnsupportedRule, mappingFallbackURL,
-		mappingFallbackValue, mappingFallbackRename,
-	} {
-		m.fallbackTotal.WithLabelValues(string(reason)).Add(0)
-	}
 	return m
-}
-
-func (m *metrics) recordMappingFallback(reason mappingFallbackReason) {
-	m.fallbackTotal.WithLabelValues(string(reason)).Inc()
 }
 
 func (m *metrics) handler() http.Handler {

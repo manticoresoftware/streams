@@ -17,7 +17,7 @@ func TestLegacyDELWholeDocumentAndOutputModes(t *testing.T) {
 			rules := []string{"text => selected", "nested[*].v => values", "whole_document => source"}
 			fields := map[string]string{"selected": "text", "values": "text", "source": "json"}
 			m := newMapper(rules, fields, mode)
-			defer m.reference.close()
+			defer closeMappingOracle(m)
 			mapped, out, e := m.transform(input)
 			if e != nil {
 				t.Fatal(e)
@@ -43,7 +43,7 @@ func TestLegacyDELWholeDocumentAndOutputModes(t *testing.T) {
 			if strictCorpusJSON(out) != strictCorpusJSON(pair.Output) {
 				t.Error("Kafka output differs")
 			}
-			if m.referenceCalls.Load() != 0 || len(m.fallbackAudit.snapshot().Counts) > 0 {
+			if mappingUnsupportedCount(m) != 0 || len(m.audit.snapshot().Counts) > 0 {
 				t.Error("fallback")
 			}
 		})
@@ -64,7 +64,7 @@ func TestLegacyLiteralDELMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("STREAMS_NATIVE_ONLY", "1")
 			m := newMapper([]string{"text => selected"}, map[string]string{"selected": "text"}, "0011")
-			defer m.reference.close()
+			defer closeMappingOracle(m)
 			mapped, output, err := m.transform(tc.input)
 			if err != nil {
 				t.Fatal("synthetic mapping failed")
@@ -78,7 +78,7 @@ func TestLegacyLiteralDELMapping(t *testing.T) {
 			if strictCorpusJSON(output) != strictCorpusJSON(tc.input) {
 				t.Error("Kafka output changed")
 			}
-			if m.referenceCalls.Load() != 0 {
+			if mappingUnsupportedCount(m) != 0 {
 				t.Error("fallback")
 			}
 			if os.Getenv("STREAMS_COMPAT_CLASSPATH") != "" {

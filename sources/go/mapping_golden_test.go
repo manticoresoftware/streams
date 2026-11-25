@@ -59,15 +59,15 @@ func TestFrozenJavaMappingGolden(t *testing.T) {
 				golden := modesExpected[mode[:3]+"0"]
 				m := newMapper([]string{"before => before", tc.path+" => selected", "after => after"},
 					map[string]string{"before": "text", "selected": tc.fieldType, "after": "text"}, mode)
-				defer m.reference.close()
+				defer closeMappingOracle(m)
 				if err := m.requireNativeSupport(); err != nil {
 					t.Fatalf("strict native compilation failed: %v", err)
 				}
 				mapped, output, err := m.transform(tc.input)
-				if m.referenceCalls.Load() != 0 {
+				if mappingUnsupportedCount(m) != 0 {
 					t.Fatal("JVM-free mapper invoked Java reference")
 				}
-				if got := m.fallbackAudit.snapshot(); len(got.Samples) != 0 {
+				if got := m.audit.snapshot(); len(got.Samples) != 0 {
 					t.Fatalf("unexpected runtime Java fallback: %+v", got.Samples)
 				}
 				if golden == "ERROR" {

@@ -21,7 +21,7 @@ func TestLegacyLenientDELParity(t *testing.T) {
 		o := quietCorpusOracle("map", string(cfg))
 		j, e := o.call(raw)
 		o.close()
-		m.reference.close()
+		closeMappingOracle(m)
 		if e != nil {
 			t.Fatal("oracle failed")
 		}

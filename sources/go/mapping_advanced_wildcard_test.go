@@ -23,11 +23,11 @@ func TestAdvancedWildcardObjectParity(t *testing.T) {
 		for _, mode := range []string{"1000", "0100", "1010", "0010"} {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
 				m := newMapper([]string{tc.rule}, map[string]string{"selected":"text"}, mode)
-				defer m.reference.close()
-				if m.needsReference { t.Fatal("Java needed at startup") }
+				defer closeMappingOracle(m)
+				if m.hasUnsupportedRule { t.Fatal("Java needed at startup") }
 				mapped, output, err := m.transform(tc.input)
 				if err != nil { t.Fatal(err) }
-				if m.referenceCalls.Load() != 0 { t.Fatal("Java fallback invoked") }
+				if mappingUnsupportedCount(m) != 0 { t.Fatal("Java fallback invoked") }
 				wantMapped, wantOutput, err := m.referenceMap(tc.input)
 				if err != nil { t.Fatal(err) }
 				got, e1 := json.Marshal(mapped)

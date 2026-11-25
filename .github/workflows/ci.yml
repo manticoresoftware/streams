@@ -61,13 +61,13 @@ jobs:
             STREAMS_MAPPING_GOLDEN_OUTPUT="$GITHUB_WORKSPACE/artifacts/mapping-audit/golden.json" \
             STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
             STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
-            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTSyntheticParseTimePrefix|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestMappingFallbackAudit|TestMalformedJaywayRuleParity|TestLegacyTerminalFunctionParity|TestLegacyLiteralDELMapping|TestLegacyDELWholeDocumentAndOutputModes|TestLegacyLenientDELParity)$' -v .
+            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTSyntheticParseTimePrefix|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestJavaGoMappingAudit|TestMalformedJaywayRuleParity|TestLegacyTerminalFunctionParity|TestLegacyLiteralDELMapping|TestLegacyDELWholeDocumentAndOutputModes|TestLegacyLenientDELParity)$' -v .
 
-      - name: Upload synthetic mapping fallback audit
+      - name: Upload synthetic Java/Go mapping parity results
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
         with:
-          name: mapping-fallback-audit
+          name: mapping-parity-audit
           path: artifacts/mapping-audit/*.json
           retention-days: 14
           if-no-files-found: warn
@@ -127,39 +127,12 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
-      - name: Build and validate worker image
+      - name: Build Go-only worker and assert Java is absent
         run: |
           docker build -t streams/worker:ci -f docker/worker/Dockerfile .
-          docker image inspect --format 'Worker image size in bytes = {{.Size}}' streams/worker:ci
-      - name: Validate audit-only Kafka sampler
-        run: docker build --target compat-audit-build -t streams/worker-audit:ci -f docker/worker/Dockerfile .
-      - name: Package JSLT audit test binary and Java reference
-        run: |
-          set -euo pipefail
-          docker build --target go-test -t streams/worker-go-test:ci -f docker/worker/Dockerfile .
-          mkdir -p jslt-audit/compat
-          worker=$(docker create streams/worker:ci)
-          docker cp "$worker:/usr/src/myapp/jslt-bundle.js" jslt-audit/jslt-bundle.js
-          docker cp "$worker:/usr/src/myapp/KafkaHandler.jar" jslt-audit/KafkaHandler.jar
-          docker cp "$worker:/usr/src/myapp/compat/." jslt-audit/compat/
-          docker rm "$worker"
-          test_container=$(docker create streams/worker-go-test:ci)
-          docker cp "$test_container:/worker.test" jslt-audit/worker.test
-          docker rm "$test_container"
-          chmod +x jslt-audit/worker.test
-          tar -czf jslt-audit.tar.gz -C jslt-audit .
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
-        with:
-          name: ci-jslt-audit
-          path: jslt-audit.tar.gz
-          retention-days: 1
-          if-no-files-found: error
-      - name: Build JVM-free image for Kubernetes E2E
-        run: |
-          docker build --target native-runtime -t streams/worker-native:ci -f docker/worker/Dockerfile .
-          docker image inspect --format 'JVM-free worker image size in bytes = {{.Size}}' streams/worker-native:ci
-          docker tag streams/worker-native:ci streams/worker:ci
-      - name: Verify timezone support inside minimal Alpine image
+          docker run --rm --entrypoint /bin/sh streams/worker:ci -c 'test ! -e /usr/src/myapp/KafkaHandler.jar && test ! -d /usr/src/myapp/compat && ! command -v java'
+          docker image inspect --format 'Go-only worker image size in bytes = {{.Size}}' streams/worker:ci
+      - name: Verify native mapping, JSLT and timezone support in Alpine
         run: docker build --target native-test -t streams/worker-native-test:ci -f docker/worker/Dockerfile .
       - name: Archive validated image
         run: |
