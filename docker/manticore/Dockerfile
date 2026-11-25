@@ -55,3 +55,26 @@ COPY --from=builder --chown=manticore:manticore /build/blended/blended.so /etc/m
 WORKDIR /etc/manticoresearch/
 USER manticore:manticore
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisord.conf"]
+
+# Experimental Streams-only pruning. The official Manticore image is unchanged.
+# The bundled Manticore package also contains searchd, Galera, Buddy and backup:
+# do not purge the package or autoremove its dependencies.
+FROM runtime AS prune
+USER root
+COPY prune-runtime.sh /tmp/prune-runtime.sh
+RUN sh /tmp/prune-runtime.sh && rm /tmp/prune-runtime.sh
+
+# Flatten the cleaned filesystem. Merely deleting files in a descendant layer
+# would leave their bytes in the original base layer.
+FROM scratch AS slim-runtime
+COPY --from=prune / /
+
+# Restore the image configuration inherited by the full runtime.
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    MANTICORE_CONFIG="/etc/manticoresearch/manticore.conf.sh|/etc/manticoresearch/manticore.conf"
+VOLUME ["/var/lib/manticore"]
+EXPOSE 9306 9308 9312
+ENTRYPOINT ["docker-entrypoint.sh"]
+WORKDIR /etc/manticoresearch/
+USER manticore:manticore
+CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisord.conf"]
