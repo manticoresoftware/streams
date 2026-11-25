@@ -79,7 +79,7 @@ COPY --from=go-test /worker.test /worker.test
 COPY sources/go/testdata/ ./testdata/
 ENV STREAMS_JSLT_BUNDLE=/usr/src/myapp/jslt-bundle.js
 RUN /usr/src/myapp/streams-worker --audit-mapping | grep -q '"static_native":true'
-RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestJSLTReplaceRegexCacheParity|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestNativeScalarWildcardInputs|TestStrictNativeMapper|TestStrictNativeMalformedDocuments|TestStrictNativeNonObjectRoots|TestStrictNativeNestedDuplicateKeys|TestURLHashGolden|TestNativeLowercase|TestLegacyTerminalFunctionParity|TestFrozenJavaMappingGolden|TestAuditWorkerMapping)$"]
+RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestJSLTParseTimePrefixNative|TestJSLTReplaceRegexCacheParity|TestNativeMappingAndOutput|TestNativeExponentDynamicSelectors|TestNativeJavaNumberSerialization|TestNativeObjectWildcardValues|TestNativeScalarWildcardInputs|TestStrictNativeMapper|TestStrictNativeMalformedDocuments|TestStrictNativeNonObjectRoots|TestStrictNativeNestedDuplicateKeys|TestURLHashGolden|TestNativeLowercase|TestLegacyTerminalFunctionParity|TestFrozenJavaMappingGolden|TestAuditWorkerMapping)$"]
 
 FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2
 RUN groupadd -r worker && useradd -r -g worker worker

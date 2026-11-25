@@ -81,6 +81,17 @@ func patchJSLTReplaceCache(bundle string) (string, error) {
 	return strings.Replace(bundle, oldReplace, newReplace, 1), nil
 }
 
+// SimpleDateFormat.parse(String), used by Java JSLT, accepts a successfully
+// parsed prefix. The pinned JS port incorrectly requires the entire input.
+func patchJSLTParseTimePrefix(bundle string) (string, error) {
+	const target = "  pat += '$';\n\n  const m = str.match(new RegExp(pat));"
+	const replacement = "  // Java SimpleDateFormat accepts trailing unparsed text.\n\n  const m = str.match(new RegExp(pat));"
+	if strings.Count(bundle, target) != 1 {
+		return "", fmt.Errorf("unexpected jslt-js bundle layout; cannot patch parse-time prefix")
+	}
+	return strings.Replace(bundle, target, replacement, 1), nil
+}
+
 var fixedTZ = regexp.MustCompile("^([+-])(\\d\\d):(\\d\\d)$")
 
 func jsltTimezone(zone string) (*time.Location, error) {
@@ -248,6 +259,10 @@ func newJSLT(config string) (func(string) (string, error), error) {
 		return nil, fmt.Errorf("read JSLT runtime: %w", err)
 	}
 	bundle, err := patchDateLiterals(string(b))
+	if err != nil {
+		return nil, err
+	}
+	bundle, err = patchJSLTParseTimePrefix(bundle)
 	if err != nil {
 		return nil, err
 	}

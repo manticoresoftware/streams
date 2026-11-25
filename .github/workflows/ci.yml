@@ -61,7 +61,7 @@ jobs:
             STREAMS_MAPPING_GOLDEN_OUTPUT="$GITHUB_WORKSPACE/artifacts/mapping-audit/golden.json" \
             STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
             STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
-            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestMappingFallbackAudit|TestMalformedJaywayRuleParity|TestLegacyTerminalFunctionParity|TestLegacyLiteralDELMapping|TestLegacyDELWholeDocumentAndOutputModes|TestLegacyLenientDELParity)$' -v .
+            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTSyntheticParseTimePrefix|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestMappingFallbackAudit|TestMalformedJaywayRuleParity|TestLegacyTerminalFunctionParity|TestLegacyLiteralDELMapping|TestLegacyDELWholeDocumentAndOutputModes|TestLegacyLenientDELParity)$' -v .
 
       - name: Upload synthetic mapping fallback audit
         if: always()
