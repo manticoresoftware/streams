@@ -26,6 +26,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          sh -n docker/manticore/prune-runtime.sh
           mkdir -p "$RUNNER_TEMP/manticore-baseline"
           git archive "$BASE_SHA" docker/manticore | tar -x -C "$RUNNER_TEMP/manticore-baseline"
           old="$RUNNER_TEMP/manticore-baseline/docker/manticore"

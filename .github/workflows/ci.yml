@@ -47,6 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           args=()
+          if [[ "$COMPONENT" == manticore ]]; then
+            sh -n docker/manticore/prune-runtime.sh
+          fi
           if [[ "$COMPONENT" == manticore && "$BENCHMARK" == true ]]; then
             # Both profiles use the exact same base and Composer images.
             base_tag=$(sed -n 's/^ARG MANTICORE_IMAGE=//p' docker/manticore/Dockerfile)
