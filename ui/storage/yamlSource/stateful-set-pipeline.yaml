@@ -196,7 +196,7 @@ spec:
           successThreshold: {{ Values.worker.readinessProbe.successThreshold }}
           timeoutSeconds: {{ Values.worker.readinessProbe.timeoutSeconds }}
           httpGet:
-            path: /live
+            path: /ready
             port: 8081
         {{- end }}
         {{- if Values.worker.livenessProbe.enabled }}
