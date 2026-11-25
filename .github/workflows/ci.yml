@@ -50,7 +50,7 @@ jobs:
       - name: Compare native Go JSLT and mapping with Java
         run: |
           set -euo pipefail
-          mvn -B -q -DskipTests -f sources/src/pom.xml compile assembly:single
+          mvn -B -q -DskipTests -f sources/src/pom.xml compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single
           worker_jar=$(find sources/src/target -maxdepth 1 -name '*-jar-with-dependencies.jar' -print -quit)
           test -n "$worker_jar"
           mkdir -p /tmp/streams-jslt-compat
@@ -83,7 +83,25 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v3.10.0
+      - name: Check pruning script syntax
+        if: matrix.component == 'manticore'
+        run: sh -n docker/manticore/prune-runtime.sh
       - run: docker build -t streams/${{ matrix.component }}:ci -f docker/${{ matrix.component }}/Dockerfile docker/${{ matrix.component }}
+      - name: Verify Manticore runtime
+        if: matrix.component == 'manticore'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint cat streams/manticore:ci /etc/manticoresearch/composer.lock | cmp - docker/manticore/composer.lock
+          docker run --rm --entrypoint sh streams/manticore:ci -ec '
+            test "$(id -u)" -ne 0
+            command -v manticore-executor
+            command -v addr2line
+            manticore-backup --version
+            libs=$(ldd /etc/manticoresearch/plugins/blended.so)
+            printf "%s\n" "$libs"
+            ! printf "%s\n" "$libs" | grep -q "not found"
+          '
+          docker image inspect --format 'Uncompressed image bytes: {{.Size}}' streams/manticore:ci
       - name: Archive validated image
         run: |
           set -euo pipefail

@@ -35,6 +35,8 @@ kubectl get pods --namespace manticore-streams
 
 After signing in to the UI, configure sources, destinations, and streams. The Kafka brokers and topics you configure must be reachable from the Manticore Streams namespace.
 
+The pipeline Manticore image is optimized for percolation and rule checking. It does not include Buddy, Columnar/KNN libraries, automatic embeddings, or offline indexing tools; custom settings requiring these features are unsupported. The separate columnar metrics store, backup/restore tool, and supported NLP dictionaries are unchanged. Rebuild images rather than upgrading packages inside a running container.
+
 ## Upgrade and uninstall
 
 Download the desired release asset, then upgrade the existing release with the same values:
