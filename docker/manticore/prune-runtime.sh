@@ -3,7 +3,7 @@ set -eu
 
 # Explicit, reviewable list. This is a Streams PQ image, not a general-purpose
 # Manticore distribution. Keep searchd, Galera, executor, backup, MySQL,
-# language packs, ICU/Jieba and secondary indexes in both profiles.
+# language packs, ICU/Jieba and secondary indexes.
 # Manticore's bundle is one package; removing these payload files intentionally
 # leaves its dpkg metadata intact. Do not upgrade packages inside this image.
 for path in \
@@ -24,13 +24,6 @@ done
 # Keep copyright notices, component licenses and the package database.
 # Manual pages and GNU info pages are not used by the runtime.
 rm -rf /usr/share/man /usr/share/info
-
-# The reference profile is the previously validated 673.5 MiB image.
-case "$1" in
-    reference) exit 0 ;;
-    streams) ;;
-    *) echo "Unknown pruning profile: $1" >&2; exit 1 ;;
-esac
 
 # Buddy is not part of the Streams query path. Keep the executor and
 # Backup unchanged, including their PHP runtime and all language data.

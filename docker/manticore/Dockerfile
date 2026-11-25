@@ -1,8 +1,6 @@
-ARG MANTICORE_IMAGE=manticoresearch/manticore:dev-32.0.5
-ARG COMPOSER_IMAGE=composer:2.11.2
-FROM ${COMPOSER_IMAGE} AS composer-bin
+FROM composer:2.11.2 AS composer-bin
 
-FROM ${MANTICORE_IMAGE} AS runtime-base
+FROM manticoresearch/manticore:dev-32.0.5 AS runtime-base
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -58,13 +56,11 @@ USER manticore:manticore
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisord.conf"]
 
 # Streams-only pruning. The official Manticore image is unchanged.
-# Retain package metadata and shared dependencies. The reference profile is
-# the previous slim image; the default Streams profile prunes more features.
+# Retain package metadata and shared dependencies.
 FROM runtime AS prune
 USER root
-ARG PRUNE_PROFILE=streams
 COPY prune-runtime.sh /tmp/prune-runtime.sh
-RUN sh /tmp/prune-runtime.sh "$PRUNE_PROFILE" && rm /tmp/prune-runtime.sh
+RUN sh /tmp/prune-runtime.sh && rm /tmp/prune-runtime.sh
 
 # Flatten the cleaned filesystem. Merely deleting files in a descendant layer
 # would leave their bytes in the original base layer.
