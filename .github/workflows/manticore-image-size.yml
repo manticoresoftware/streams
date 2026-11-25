@@ -1,0 +1,108 @@
+name: Manticore image size
+
+on:
+  pull_request:
+    paths:
+      - 'docker/manticore/**'
+      - '.github/workflows/manticore-image-size.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manticore-image-size-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+        with:
+          fetch-depth: 0
+      - name: Build both images against the same base digest
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/manticore-baseline"
+          git archive "$BASE_SHA" docker/manticore | tar -x -C "$RUNNER_TEMP/manticore-baseline"
+          old="$RUNNER_TEMP/manticore-baseline/docker/manticore"
+          base_tag=$(awk '$1 == "FROM" { print $2; exit }' "$old/Dockerfile")
+          composer_tag=$(sed -n 's/^ARG COMPOSER_IMAGE=//p' docker/manticore/Dockerfile)
+          docker pull "$base_tag"
+          docker pull "$composer_tag"
+          base_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$base_tag")
+          composer_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$composer_tag")
+          printf 'Base: %s\nComposer: %s\n' "$base_ref" "$composer_ref" | tee image-inputs.txt
+
+          # Use identical base and Composer images for both builds.
+          sed -i "1s|^FROM .*|FROM $base_ref|; s|COPY --from=composer:latest |COPY --from=$composer_ref |" "$old/Dockerfile"
+          docker build --no-cache --progress=plain \
+            --build-arg MANTICORE_IMAGE="$base_ref" --build-arg COMPOSER_IMAGE="$composer_ref" \
+            -t streams/manticore:optimized docker/manticore
+          docker run --rm --entrypoint cat streams/manticore:optimized \
+            /etc/manticoresearch/composer.lock > manticore-composer.lock
+          docker build --no-cache --progress=plain -t streams/manticore:baseline "$old"
+      - name: Compare image sizes and layers
+        run: |
+          set -euo pipefail
+          base_ref=$(sed -n 's/^Base: //p' image-inputs.txt)
+          size() { docker image inspect --format '{{.Size}}' "$1"; }
+          archive_size() { docker save "$1" | gzip -n -1 | wc -c; }
+          base=$(size "$base_ref")
+          before=$(size streams/manticore:baseline)
+          after=$(size streams/manticore:optimized)
+          before_gz=$(archive_size streams/manticore:baseline)
+          after_gz=$(archive_size streams/manticore:optimized)
+          {
+            echo '## Manticore Streams image size'
+            echo
+            cat image-inputs.txt
+            echo
+            echo '| Metric | Baseline | Optimized | Reduction |'
+            echo '| --- | ---: | ---: | ---: |'
+            row() {
+              awk -v name="$1" -v before="$2" -v after="$3" \
+                'BEGIN { printf "| %s | %.1f MiB | %.1f MiB | %.1f%% |\n", name, before/1048576, after/1048576, 100*(before-after)/before }'
+            }
+            row 'Uncompressed image' "$before" "$after"
+            row 'Added above base' "$((before-base))" "$((after-base))"
+            row 'Gzip Docker archive' "$before_gz" "$after_gz"
+            echo
+            printf 'Base image: %s bytes; baseline: %s bytes; optimized: %s bytes.\n' "$base" "$before" "$after"
+            echo 'Gzip archive sizes are a comparable transfer-size proxy, not registry layer sizes.'
+          } | tee image-size.md
+          cat image-size.md >> "$GITHUB_STEP_SUMMARY"
+          for image in baseline optimized; do
+            echo "=== $image layers ==="
+            docker history --human=false --format '{{.Size}} {{.CreatedBy}}' "streams/manticore:$image"
+          done
+      - name: Check runtime files and dependencies as manticore
+        run: |
+          docker run --rm --entrypoint sh streams/manticore:optimized -ec '
+            test "$(id -u)" -ne 0
+            for dir in /var/lib/manticore /var/log/manticore /var/run/manticore; do test -w "$dir"; done
+            for lang in en de ru; do test -r "/usr/share/manticore/$lang.pak"; done
+            test -x /etc/manticoresearch/manticore.conf
+            test -x /etc/manticoresearch/starter.sh
+            test -x /etc/manticoresearch/l_probe.sh
+            test -x /etc/manticoresearch/r_probe.sh
+            command -v searchd
+            command -v mysql
+            command -v supervisorctl
+            php -r '"'"'require "vendor/autoload.php"; if (PHP_VERSION_ID < 80513 || PHP_VERSION_ID >= 80600 || !extension_loaded("mysqli") || !extension_loaded("curl") || !class_exists("Core\\K8s\\ApiClient") || !class_exists("Core\\Manticore\\ManticoreStreamsConnector")) exit(1);'"'"'
+            libs=$(ldd /etc/manticoresearch/plugins/blended.so)
+            printf "%s\n" "$libs"
+            ! printf "%s\n" "$libs" | grep -q "not found"
+          '
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        if: always()
+        with:
+          name: manticore-image-comparison
+          path: |
+            image-inputs.txt
+            image-size.md
+            manticore-composer.lock
+          retention-days: 7

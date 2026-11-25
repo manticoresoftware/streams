@@ -1,36 +1,57 @@
-FROM manticoresearch/manticore:dev-32.0.5
+ARG MANTICORE_IMAGE=manticoresearch/manticore:dev-32.0.5
+ARG COMPOSER_IMAGE=composer:2.11.2
+FROM ${COMPOSER_IMAGE} AS composer-bin
 
-RUN apt-get update && echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections \
-    && apt-get -y install wget supervisor logrotate git zip unzip gnupg curl tree cmake \
+FROM ${MANTICORE_IMAGE} AS runtime-base
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl supervisor logrotate \
     && curl -fsSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb \
     && dpkg -i /tmp/debsuryorg-archive-keyring.deb && rm /tmp/debsuryorg-archive-keyring.deb \
     && . /etc/os-release \
     && echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ ${VERSION_CODENAME} main" > /etc/apt/sources.list.d/php.list \
-    && apt-get update && apt-get install -y \
-    php8.5-cli php8.5-mysql php8.5-zip php8.5-curl php8.5-xml php8.5-mbstring \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        php8.5-cli php8.5-mysql php8.5-zip php8.5-curl php8.5-xml php8.5-mbstring \
     && php -r 'if (PHP_VERSION_ID < 80513 || PHP_VERSION_ID >= 80600) exit(1);' \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy from docker/manticore/ context
-COPY composer.json manticore.conf starter.sh replica.php alter.php l_probe.sh r_probe.sh quorum.php env_reader.php quorum_fixer.sh /etc/manticoresearch/
-COPY lang_package/en.pak lang_package/de.pak lang_package/ru.pak /usr/share/manticore/
-COPY supervisord.conf /etc/supervisord.conf
-COPY blended/* /tmp/blended/
-COPY logrotate/manticore /etc/logrotate.d/manticore
-COPY logrotate/logrotate.sh /logrotate.sh
-COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
+FROM runtime-base AS builder
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        gcc libc6-dev make git unzip \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=composer-bin /usr/bin/composer /usr/local/bin/composer
 
-RUN cd /etc/manticoresearch/ && \
-    composer update && \
-    mkdir /etc/manticoresearch/plugins/ && cp /usr/include/manticore/sphinxudf.h /tmp/blended/ && \
-    cd /tmp/blended && make && mv /tmp/blended/blended.so /etc/manticoresearch/plugins/ && \
-    mkdir -p /var/log/supervisor && chown -R manticore /var/log/manticore/ /var/lib/manticore \
-    /var/run/manticore /etc/manticoresearch/ /usr/share/manticore/ /var/log/supervisor && \
-    chmod +x /etc/manticoresearch/l_probe.sh /etc/manticoresearch/r_probe.sh && \
-    sed -i 's/'"'"'version'"'"' => 2.0\,//' /etc/manticoresearch/vendor/manticoresoftware/manticoresearch-auto-replication/src/K8s/ApiClient.php
+WORKDIR /build/deps
+COPY composer.* ./
+RUN COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-progress \
+    && composer check-platform-reqs --no-dev \
+    && sed -i "s/'version' => 2.0,//" vendor/manticoresoftware/manticoresearch-auto-replication/src/K8s/ApiClient.php
+
+WORKDIR /build/blended
+COPY blended/ ./
+RUN cp /usr/include/manticore/sphinxudf.h . && make
+
+FROM runtime-base AS runtime
+
+# Keep write access to the runtime directories, without copying up the
+# read-only dictionaries and modules from the base image.
+RUN mkdir -p /etc/manticoresearch/plugins /var/log/supervisor \
+    && chown manticore /etc/manticoresearch /etc/manticoresearch/plugins /var/log/supervisor \
+    && chown -R manticore /var/log/manticore /var/lib/manticore /var/run/manticore
+
+COPY --chown=manticore:manticore composer.json replica.php alter.php quorum.php env_reader.php /etc/manticoresearch/
+COPY --chown=manticore:manticore --chmod=0755 manticore.conf starter.sh l_probe.sh r_probe.sh quorum_fixer.sh /etc/manticoresearch/
+COPY --chown=manticore:manticore lang_package/en.pak lang_package/de.pak lang_package/ru.pak /usr/share/manticore/
+COPY supervisord.conf /etc/supervisord.conf
+COPY logrotate/manticore /etc/logrotate.d/manticore
+COPY --chmod=0755 logrotate/logrotate.sh /logrotate.sh
+COPY --from=builder --chown=manticore:manticore /build/deps/vendor/ /etc/manticoresearch/vendor/
+COPY --from=builder --chown=manticore:manticore /build/deps/composer.lock /etc/manticoresearch/composer.lock
+COPY --from=builder --chown=manticore:manticore /build/blended/blended.so /etc/manticoresearch/plugins/blended.so
 
 WORKDIR /etc/manticoresearch/
-
 USER manticore:manticore
-
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisord.conf"]
