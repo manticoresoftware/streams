@@ -11,8 +11,10 @@ on:
 permissions:
   contents: read
 
+# A manually dispatched staging publication must not be cancelled by a new
+# pull_request event on the same branch (otherwise tags might be half-published).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'automatic' }}
   cancel-in-progress: true
 
 jobs:
@@ -199,6 +201,13 @@ jobs:
           done
       - name: Materialize development chart version
         run: bash .github/scripts/materialize-chart-version.sh
+      - name: Validate PR #12 staging Helm bundle
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 12
+        env:
+          PR_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bash -n .github/scripts/package-pr-staging.sh
+          bash .github/scripts/package-pr-staging.sh "$PR_SOURCE_SHA" "$RUNNER_TEMP/pr12-staging-check"
       - run: helm lint helm-chart
       - run: helm template manticore-streams helm-chart --kube-version v1.32.5 > rendered-default.yaml
       - run: docker run --rm -v "$PWD:/work" -w /work ghcr.io/yannh/kubeconform:v0.6.7@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c -strict -summary -kubernetes-version 1.32.5 rendered-default.yaml
@@ -393,6 +402,81 @@ jobs:
             artifacts/
             artifacts-rendered-helm.yaml
           retention-days: 3
+
+  # Manual opt-in: Actions > CI > Run workflow > select wip/go-worker.
+  # CI already exists on master, so this works before PR #12 is merged.
+  # Regular pull_request and push events never publish staging tags.
+  publish-pr-staging:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/wip/go-worker'
+    needs: [k8s-e2e, helm, image-build, ui-image-build, worker-image-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - name: Verify staging candidate is current same-repo PR #12 HEAD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/12")
+          jq -e --arg source "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .number == 12 and .state == "open" and .base.ref == "master" and
+            .head.ref == "wip/go-worker" and .head.repo.full_name == $repo and
+            .head.sha == $source
+          ' <<< "$pr" >/dev/null
+          echo "Publishing the verified, current PR #12 head $GITHUB_SHA"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
+      - name: Prepare the matching staging chart and values
+        run: |
+          set -euo pipefail
+          bash .github/scripts/package-pr-staging.sh "$GITHUB_SHA" "$RUNNER_TEMP/pr12-staging"
+      - name: Download six already-tested images from this CI run
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
+        with:
+          pattern: ci-image-*
+          path: ci-staging-images
+          merge-multiple: true
+      - name: Publish the verified PR images to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="pr-12-${GITHUB_SHA:0:12}"
+          echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for component in worker manticore scaler rules_checker ui ui-nginx; do
+            archive="ci-staging-images/${component}.tar.gz"
+            test -s "$archive"
+            gzip -t "$archive"
+            gzip -dc "$archive" | docker load
+            docker image inspect "streams/${component}:ci" >/dev/null
+            image="ghcr.io/manticoresoftware/streams/${component}:${tag}"
+            docker tag "streams/${component}:ci" "$image"
+            docker push "$image"
+          done
+          docker logout ghcr.io
+      - name: Upload Helm chart, pinned values and instructions
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: staging-pr-12-${{ github.sha }}
+          path: ${{ runner.temp }}/pr12-staging/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Summarize staging handoff
+        run: |
+          set -euo pipefail
+          tag="pr-12-${GITHUB_SHA:0:12}"
+          {
+            echo "### PR #12 staging images published"
+            echo
+            echo "Verified source: `$GITHUB_SHA`"
+            echo "GHCR image tag: `$tag` (all six Streams images)"
+            echo "Download the `staging-pr-12-$GITHUB_SHA` workflow artifact for the matching Helm chart, pinned values and README."
+            echo "Staging only; no production release was created."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
