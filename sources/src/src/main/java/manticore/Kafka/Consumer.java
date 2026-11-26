@@ -21,6 +21,8 @@ public class Consumer {
     private List<String> topics;
 
     private int failedCommitCount = 0;
+    // Accessed by the poll loop, rebalance listener and timer under this object's lock.
+    private final Map<TopicPartition, OffsetAndMetadata> currentOffsets = new HashMap<>();
 
     public Consumer(KafkaConsumer<String, String> consumer) {
         this.consumer = consumer;
@@ -55,6 +57,11 @@ public class Consumer {
             public void onPartitionsRevoked(Collection<TopicPartition> collection) {
                 rebalancingState = true;
                 lastRebalancing = System.currentTimeMillis();
+                synchronized (Consumer.this) {
+                    for (TopicPartition partition : collection) {
+                        currentOffsets.remove(partition);
+                    }
+                }
                 Worker.getLogger().info("[KafkaConsumer] Revoked partitions {} for topics {}", collection, topics);
             }
 
@@ -96,10 +103,43 @@ public class Consumer {
         }
     }
 
+    public void recordOffset(TopicPartition partition, long nextOffset) {
+        synchronized (this) {
+            currentOffsets.put(partition, new OffsetAndMetadata(nextOffset, "no metadata"));
+        }
+    }
+
+    public Map<TopicPartition, OffsetAndMetadata> getOffsets() {
+        synchronized (this) {
+            return new HashMap<>(currentOffsets);
+        }
+    }
+
+    public void commitRecordedOffsets() {
+        synchronized (this) {
+            commitSync(currentOffsets);
+        }
+    }
+
+    private Map<TopicPartition, OffsetAndMetadata> assignedOffsets(Map<TopicPartition, OffsetAndMetadata> offsets) {
+        Map<TopicPartition, OffsetAndMetadata> assigned = new HashMap<>();
+        for (TopicPartition partition : consumer.assignment()) {
+            OffsetAndMetadata offset = offsets.get(partition);
+            if (offset != null) {
+                assigned.put(partition, offset);
+            }
+        }
+        return assigned;
+    }
+
     public void commitSync(Map<TopicPartition, OffsetAndMetadata> currentOffsets) {
         synchronized (this) {
+            Map<TopicPartition, OffsetAndMetadata> assigned = assignedOffsets(currentOffsets);
+            if (assigned.isEmpty()) {
+                return;
+            }
             try {
-                this.consumer.commitSync(currentOffsets, Duration.ofMillis(5000L));
+                this.consumer.commitSync(assigned, Duration.ofMillis(5000L));
                 failedCommitCount = 0;
                 Worker.getLogger().debug("[KafkaConsumer] Successfully committed offsets for topics");
             } catch (TimeoutException exception) {
@@ -117,7 +157,10 @@ public class Consumer {
 
     public void commitAsync(Map<TopicPartition, OffsetAndMetadata> currentOffsets) {
         synchronized (this) {
-            this.consumer.commitAsync(currentOffsets, null);
+            Map<TopicPartition, OffsetAndMetadata> assigned = assignedOffsets(currentOffsets);
+            if (!assigned.isEmpty()) {
+                this.consumer.commitAsync(assigned, null);
+            }
         }
     }
 

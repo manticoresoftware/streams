@@ -113,8 +113,8 @@ class WorkerTest {
 
             verify(mockManticoreBatch).setSize(1);
             verify(mockManticoreBatch).stack("value1");
-            verify(mockConsumer).commitSync(anyMap());
-            assertEquals(11L, worker.currentOffsets.get(partition).offset());
+            verify(mockConsumer).recordOffset(partition, 11L);
+            verify(mockConsumer).commitRecordedOffsets();
         }
     }
 
@@ -236,7 +236,7 @@ class WorkerTest {
     void testLogOffset_WithOffsets() {
         TopicPartition partition = new TopicPartition("my-docs", 0);
         OffsetAndMetadata offset = new OffsetAndMetadata(123, "no metadata");
-        worker.currentOffsets.put(partition, offset);
+        when(mockConsumer.getOffsets()).thenReturn(Map.of(partition, offset));
 
         worker.logOffset();
 
@@ -245,13 +245,11 @@ class WorkerTest {
 
     @Test
     void testProcessBatchByTimer_CommitsOffsetsWhenProcessed() {
-        TopicPartition partition = new TopicPartition("my-docs", 0);
-        worker.currentOffsets.put(partition, new OffsetAndMetadata(123L, "no metadata"));
         when(mockManticoreBatch.processByTimer()).thenReturn(true);
 
         worker.processBatchByTimer();
 
-        verify(mockConsumer).commitSync(worker.currentOffsets);
+        verify(mockConsumer).commitRecordedOffsets();
         assertFalse(worker.isProcessingByTimerRan);
     }
 

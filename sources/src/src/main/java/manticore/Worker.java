@@ -33,7 +33,6 @@ public class Worker {
     private final Logger logger;
     protected final String instanceLabel;
     private final String processingName;
-    protected final Map<TopicPartition, OffsetAndMetadata> currentOffsets = new HashMap<>();
     public boolean isProcessingByTimerRan = false;
     private final ManticoreConnector manticoreConnector;
     private final WorkerConfig config;
@@ -198,9 +197,7 @@ public class Worker {
             }
 
             consumerRecords.forEach(record -> {
-                currentOffsets.put(
-                        new TopicPartition(record.topic(), record.partition()),
-                        new OffsetAndMetadata(record.offset() + 1, "no metadata"));
+                consumer.recordOffset(new TopicPartition(record.topic(), record.partition()), record.offset() + 1);
 
                 if (isFirstOffset) {
                     logger.debug("[Worker] First offset recorded for process {}", processLabel);
@@ -219,7 +216,7 @@ public class Worker {
                     isProcessingByTimerRan = true;
                     if (manticoreBatch.stack(record.value())) {
                         try {
-                            consumer.commitSync(currentOffsets);
+                            consumer.commitRecordedOffsets();
                             logger.debug("[Worker] Committed offsets asynchronously for process {}", processLabel);
                             logOffset();
                         } catch (Exception e) {
@@ -234,7 +231,7 @@ public class Worker {
     }
 
     public void logOffset() {
-        for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : currentOffsets.entrySet()) {
+        for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : consumer.getOffsets().entrySet()) {
             logger.debug("[Worker] Offset for partition {}: {} for process {}", entry.getKey().partition(), entry.getValue().offset(), processLabel);
         }
     }
@@ -416,7 +413,7 @@ public class Worker {
         try {
             if (manticoreBatch.processByTimer()) {
                 try {
-                    consumer.commitSync(currentOffsets);
+                    consumer.commitRecordedOffsets();
                     logger.info("[Worker] Committed offsets synchronously from timer processing for process {}", processLabel);
                     logOffset();
                 } catch (Exception e) {
