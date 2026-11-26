@@ -249,6 +249,20 @@ class ManticoreServiceTest extends TestCase
                 'search query @merged -https://mail.google.com/',
                 'search query  -(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 '.
                 '1d5920f4b44b27a802bd77c4f0536f5a be5cab0695415d9363d18ad1345c73eb)',
+            ],
+            [
+                // a url field name inside the leading parentheses is plain
+                // text, not a "@(field) query" list: mixed case used to crash
+                // with "Undefined array key 0"...
+                '(("John UnMerged" | "x") | "y") @merged -x.com',
+                '(("john unmerged" | "x") | "y")  -(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 '.
+                '9a4323a3426983ab24744f3fdbd15200)',
+            ],
+            [
+                // ...and lowercase got rewritten into a bogus "_host_path" hash
+                '(("John unmerged" | "x") | "y") @merged -x.com',
+                '(("john unmerged" | "x") | "y")  -(@merged_host_path 4d236d9a2d102c5fe6ad1c50da4bec50 '.
+                '9a4323a3426983ab24744f3fdbd15200)',
             ]
         ];
     }

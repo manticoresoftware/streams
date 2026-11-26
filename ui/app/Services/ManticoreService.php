@@ -1109,37 +1109,40 @@ class ManticoreService extends BaseManticoreService
                             continue;
                         }
 
-                        if (trim($value[1]) === '('
-                            && preg_match_all(
-                                '/\(.*?' . $field . '.*?\) (.*)/usi',
-                                $value,
-                                $matches
-                            )
-                        ) {
-                            preg_match('/\((.*?' . $field . '.*?)\)/', $value,
-                                $offsetMatches, PREG_OFFSET_CAPTURE);
-                            $matchStart = $offsetMatches[0][1];
-                            $matchEnd = $offsetMatches[0][1]
-                                + strlen($offsetMatches[0][0]);
-                            $foundMatch = substr($value, $matchStart + 1,
-                                $matchEnd - 3);
-                            $replaced = explode(',', $foundMatch);
-
-
-                            $replaced = array_map(static function ($row) {
+                        // Only a chunk that starts with a field list
+                        // "@(f1, f2) query" names fields. The first chunk
+                        // holds whatever precedes the first marker and may
+                        // start with "(" too, e.g. '(("Name" | "AmateurLeader"))';
+                        // matching the field name anywhere inside parentheses
+                        // (case-insensitively, as before) mistook such text
+                        // for a field list: a mixed-case hit ("urL") crashed on
+                        // an empty offset match ("Undefined array key 0"),
+                        // a lowercase one ("curly") rewrote the text as a URL.
+                        if (preg_match('/^@\(([^)]*)\) (.*)$/us', $value, $listMatch)) {
+                            $listed = array_map(static function ($row) {
                                 return trim($row);
-                            }, $replaced);
+                            }, explode(',', $listMatch[1]));
 
-                            $result = '';
-                            foreach ($replaced as $fieldName) {
-                                $result .= ' ' . $this->urlizeQuery($fieldName,
-                                        $matches[1][0]);
+                            $isListed = false;
+                            foreach ($listed as $fieldName) {
+                                if (strcasecmp($fieldName, $field) === 0) {
+                                    $isListed = true;
+                                    break;
+                                }
                             }
-                            $explodedText[$k] = $result;
-                            continue;
+
+                            if ($isListed) {
+                                $result = '';
+                                foreach ($listed as $fieldName) {
+                                    $result .= ' ' . $this->urlizeQuery($fieldName,
+                                            $listMatch[2]);
+                                }
+                                $explodedText[$k] = $result;
+                                continue;
+                            }
                         }
 
-                        if (strpos($value, $field) === 1) {
+                        if ($value[0] === '@' && strpos($value, $field) === 1) {
                             // если совпало название поля с самого начала
                             $query = substr($value, mb_strlen($field) + 1);
 
