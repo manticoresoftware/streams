@@ -199,8 +199,6 @@ jobs:
               exit 1
             }
           done
-      - name: Materialize development chart version
-        run: bash .github/scripts/materialize-chart-version.sh
       - name: Validate PR #12 staging Helm bundle
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 12
         env:
@@ -208,6 +206,8 @@ jobs:
         run: |
           bash -n .github/scripts/package-pr-staging.sh
           bash .github/scripts/package-pr-staging.sh "$PR_SOURCE_SHA" "$RUNNER_TEMP/pr12-staging-check"
+      - name: Materialize development chart version
+        run: bash .github/scripts/materialize-chart-version.sh
       - run: helm lint helm-chart
       - run: helm template manticore-streams helm-chart --kube-version v1.32.5 > rendered-default.yaml
       - run: docker run --rm -v "$PWD:/work" -w /work ghcr.io/yannh/kubeconform:v0.6.7@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c -strict -summary -kubernetes-version 1.32.5 rendered-default.yaml
@@ -229,6 +229,7 @@ jobs:
               - 'helm-chart/**'
               - '.github/docker-compose/laravel-tests.yml'
               - '.github/scripts/k8s/**'
+              - '.github/scripts/package-pr-staging.sh'
               - 'dev-environment/k8s_tests/**'
               - '.github/workflows/ci.yml'
 
@@ -472,9 +473,9 @@ jobs:
           {
             echo "### PR #12 staging images published"
             echo
-            echo "Verified source: `$GITHUB_SHA`"
-            echo "GHCR image tag: `$tag` (all six Streams images)"
-            echo "Download the `staging-pr-12-$GITHUB_SHA` workflow artifact for the matching Helm chart, pinned values and README."
+            echo "Verified source commit: $GITHUB_SHA"
+            echo "GHCR image tag: $tag (all six Streams images)"
+            echo "Download the staging-pr-12-$GITHUB_SHA workflow artifact for the matching Helm chart, pinned values and README."
             echo "Staging only; no production release was created."
           } >> "$GITHUB_STEP_SUMMARY"
 
