@@ -31,12 +31,35 @@ curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
   --output "$chart_archive" \
   "https://charts.bitnami.com/bitnami/kafka-${KAFKA_CHART_VERSION}.tgz"
 printf '%s  %s\n' "$KAFKA_CHART_SHA256" "$chart_archive" | sha256sum --check --status
+# Keep the exact upstream Kafka digest, but preload it into K3s under the
+# pinned tag. K3s/containerd pulls on shared CI IPs sometimes receive Docker
+# Hub 429 responses even when the GitHub-hosted runner's Docker daemon can
+# pull images. Try Google's Docker Hub mirror before Docker Hub itself.
+# With imagePullPolicy=IfNotPresent the pod uses this verified local image.
+kafka_digest="sha256:aa0b2aee8c5610dd1d18d48b4f1df0dbe3267b5d4c338d36c9af9cbf0529c0b0"
+kafka_tag="4.0.0-debian-12-r10"
+source_image=""
+for registry in mirror.gcr.io docker.io; do
+  candidate="$registry/bitnamilegacy/kafka@$kafka_digest"
+  if docker pull --platform linux/amd64 "$candidate"; then
+    source_image="$candidate"
+    break
+  fi
+  echo "Could not fetch pinned Kafka image from $registry; trying next registry" >&2
+done
+[ -n "$source_image" ] || { echo "Unable to download pinned Kafka image from either registry" >&2; exit 1; }
+kafka_image="docker.io/bitnamilegacy/kafka:$kafka_tag"
+docker tag "$source_image" "$kafka_image"
+docker save "$kafka_image" | sudo k3s ctr -n k8s.io images import -
+sudo k3s ctr -n k8s.io images list -q | grep -Fx "$kafka_image"
+
 helm upgrade --install "$KAFKA_RELEASE_NAME" "$chart_archive" \
   --namespace "$KAFKA_NAMESPACE" --create-namespace \
   --version "$KAFKA_CHART_VERSION" \
   --set image.repository=bitnamilegacy/kafka \
   --set image.tag=4.0.0-debian-12-r10 \
-  --set image.digest=sha256:aa0b2aee8c5610dd1d18d48b4f1df0dbe3267b5d4c338d36c9af9cbf0529c0b0 \
+  --set-string image.digest= \
+  --set image.pullPolicy=IfNotPresent \
   --set controller.replicaCount=1 \
   --set broker.replicaCount=0 \
   --set listeners.client.protocol=PLAINTEXT \

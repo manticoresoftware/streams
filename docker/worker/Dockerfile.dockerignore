@@ -1,0 +1,7 @@
+**
+!sources/
+!sources/go/
+!sources/go/**
+!docker/
+!docker/worker/
+!docker/worker/check.sh

@@ -11,11 +11,8 @@ cd .. && docker-compose down && docker-compose up -d || exit 0
 echo -e "\e[32mDocker compose up to date\e[0m"
 
 
-ROOT_PATH="$(pwd)/../sources"
-cd $ROOT_PATH/src/ && mvn clean compile assembly:single
-cd $ROOT_PATH/../docker/worker/
-rm $ROOT_PATH/../docker/worker/KafkaHandler.jar
-cp $ROOT_PATH/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar $ROOT_PATH/../docker/worker/KafkaHandler.jar
+repo_root=$(cd .. && pwd)
+docker build -t streams/worker:dev -f "$repo_root/docker/worker/Dockerfile" "$repo_root" || exit 1
 
 docker exec -it manticore mysql -h0 -P9306 -e "TRUNCATE TABLE m1_cluster:pq"
 
@@ -28,7 +25,6 @@ docker exec -it manticore mysql -h0 -P9306 -e "insert into m1_cluster:pq (query)
 docker exec -it kafka /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server=localhost:9092 --create --topic my-results --partitions=1 --replication-factor=1
 docker exec -it kafka /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server=localhost:9092 --create --topic my-docs --partitions=1 --replication-factor=1
 
-cd $ROOT_PATH/../dev-environment
 
 
 export LABEL="m1" OUTPUT_DOCS="0011" \
@@ -40,7 +36,11 @@ PROCESSED_MEASURE_TIME="60" MAX_BATCH_SIZE="5000" METRICS_STORAGE_HOST="localhos
 
 
 
-timeout 120 java -jar ../docker/worker/KafkaHandler.jar &
+timeout 120 docker run --rm --network host \
+  -e LABEL -e OUTPUT_DOCS -e TRANSFORM_RULES -e MANTICORE_FIELDS -e LOG_LEVEL -e SUSPEND \
+  -e SCALER_HOST -e KAFKA_INPUT_HOST -e KAFKA_OUTPUT_HOST -e MANTICORE_HOST -e KAFKA_INPUT_TOPIC \
+  -e KAFKA_OUTPUT_TOPIC -e KAFKA_GROUP_NAME -e MAX_THREADS -e PROCESSED_MEASURE_TIME -e MAX_BATCH_SIZE \
+  -e METRICS_STORAGE_HOST -e METRICS_STORAGE_PORT -e DEBUG_PROCESSING streams/worker:dev &
 
 sleep 10
 

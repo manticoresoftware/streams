@@ -12,7 +12,7 @@ cp .env.example .env
 
 Set `DEV_CLUSTER_IP`, `DEV_CLUSTER_USER`, and `CLUSTER_NAME` in `.env`. SSH uses the agent or `~/.ssh/config`; set `DEV_CLUSTER_SSH_KEY` only when a specific key file is needed.
 
-The remote user must have Docker, Java 21, Maven, Helm, `kubectl`, and K3d. The runner adds `$HOME/.local/bin` to the remote `PATH`, which is where the development-server K3d, Helm, and kubectl tools were installed. It uses an isolated empty Docker configuration at `$HOME/.local/share/manticore-streams/docker-anonymous` so stale private registry credentials cannot block public base-image pulls. No sudo is required.
+The remote user must have Docker, Helm, `kubectl`, and K3d. The runner adds `$HOME/.local/bin` to the remote `PATH`, which is where the development-server K3d, Helm, and kubectl tools were installed. It uses an isolated empty Docker configuration at `$HOME/.local/share/manticore-streams/docker-anonymous` so stale private registry credentials cannot block public base-image pulls. No sudo is required.
 
 ## Development-server commands
 

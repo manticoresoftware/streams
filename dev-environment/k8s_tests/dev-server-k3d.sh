@@ -40,26 +40,12 @@ die() {
 }
 
 require_commands() {
-  local command commands=(docker helm kubectl k3d mvn python3)
+  local command commands=(docker helm kubectl k3d python3)
   [ "$CLUSTER_MODE" = k3d ] || die "unsupported CLUSTER_MODE: $CLUSTER_MODE"
   for command in "${commands[@]}"; do
     command -v "$command" >/dev/null 2>&1 || die "required command is not installed: $command"
   done
   docker info >/dev/null 2>&1 || die 'Docker is not running'
-}
-
-java_home() {
-  if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
-    printf '%s\n' "$JAVA_HOME"
-    return
-  fi
-
-  if [ "$(uname -s)" = Darwin ] && [ -x /usr/libexec/java_home ]; then
-    /usr/libexec/java_home -v 21 2>/dev/null || die 'Java 21 is required; install it or set JAVA_HOME'
-    return
-  fi
-
-  die 'JAVA_HOME must point to a Java 21 installation'
 }
 
 kubectl_dev() {
@@ -154,19 +140,13 @@ wait_for_node() {
 }
 
 build_images() (
-  local tag staging build_java_home
+  local tag staging
   tag=$(version)
-  build_java_home=$(java_home)
   staging=$(mktemp -d)
   trap 'rm -rf "$staging"' EXIT
 
-  (
-    cd "$ROOT/sources/src"
-    JAVA_HOME="$build_java_home" mvn clean compile assembly:single
-  )
-
-  cp -a "$ROOT/docker/worker" "$staging/worker"
-  cp "$ROOT/sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar" "$staging/worker/KafkaHandler.jar"
+  docker buildx build --platform "$PLATFORM" --load \
+    -t streams/worker:ci -f "$ROOT/docker/worker/Dockerfile" "$ROOT"
   cp -a "$ROOT/docker/ui" "$staging/ui"
   cp -a "$ROOT/ui/." "$staging/ui/source/"
   cp -a "$ROOT/docker/ui-nginx" "$staging/ui-nginx"
@@ -177,7 +157,7 @@ build_images() (
       -t "streams/${component}:ci" \
       -f "$ROOT/docker/${component}/Dockerfile" "$ROOT/docker/${component}"
   done
-  for component in worker ui ui-nginx; do
+  for component in ui ui-nginx; do
     docker buildx build --platform "$PLATFORM" --load \
       -t "streams/${component}:ci" \
       -f "$staging/${component}/Dockerfile" "$staging/${component}"
@@ -469,7 +449,7 @@ raise SystemExit(1)' "$CLUSTER_NAME"
 
   remote_image_tag=$(git -C "$ROOT" rev-parse --short HEAD) || die 'remote mode requires a Git checkout on the local machine'
   # shellcheck disable=SC2016 # $HOME and $PATH must expand on the remote host.
-  printf -v remote_command 'export PATH="$HOME/.local/bin:$PATH" DOCKER_CONFIG="$HOME/.local/share/manticore-streams/docker-anonymous"; mkdir -p "$DOCKER_CONFIG"; if [ -z "${JAVA_HOME:-}" ] && [ -x "$HOME/.local/jdks/temurin-21/bin/java" ]; then export JAVA_HOME="$HOME/.local/jdks/temurin-21"; fi; cd %q && REMOTE_EXECUTION=1 CLUSTER_MODE=k3d CLUSTER_NAME=%q IMAGE_TAG=%q bash dev-environment/k8s_tests/dev-server-k3d.sh %q' \
+  printf -v remote_command 'export PATH="$HOME/.local/bin:$PATH" DOCKER_CONFIG="$HOME/.local/share/manticore-streams/docker-anonymous"; mkdir -p "$DOCKER_CONFIG"; cd %q && REMOTE_EXECUTION=1 CLUSTER_MODE=k3d CLUSTER_NAME=%q IMAGE_TAG=%q bash dev-environment/k8s_tests/dev-server-k3d.sh %q' \
     "$DEV_CLUSTER_WORKDIR" "$CLUSTER_NAME" "$remote_image_tag" "$command"
   if "${ssh_options[@]}" "$target" "$remote_command"; then
     :

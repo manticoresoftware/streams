@@ -11,8 +11,10 @@ on:
 permissions:
   contents: read
 
+# A manually dispatched staging publication must not be cancelled by a new
+# pull_request event on the same branch (otherwise tags might be half-published).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'automatic' }}
   cancel-in-progress: true
 
 jobs:
@@ -28,6 +30,49 @@ jobs:
           cache: maven
       - run: mvn test -DskipTests=false -Dmaven.test.skip=false
         working-directory: sources/src
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: sources/go/go.mod
+          cache-dependency-path: sources/go/go.sum
+      - name: Prepare Goja JSLT tests
+        run: |
+          curl -fsSL --retry 3 https://cdn.jsdelivr.net/npm/jslt-js@0.1.8/dist/jslt-bundle.js -o sources/go/jslt-bundle.js
+          cd sources/go
+          printf '%s  %s\n' ce1c69ad5dd4f7e82a69b7fa0b13926266606e3f3a4abd666f407c1e64dbb365 jslt-bundle.js | sha256sum -c -
+      - run: go test ./...
+        working-directory: sources/go
+        env:
+          STREAMS_JSLT_BUNDLE: ${{ github.workspace }}/sources/go/jslt-bundle.js
+      - name: Check Go worker concurrency with the race detector
+        run: go test -race -count=1 ./...
+        working-directory: sources/go
+        env:
+          STREAMS_JSLT_BUNDLE: ${{ github.workspace }}/sources/go/jslt-bundle.js
+      # Compare only invented fixtures; production expressions remain private.
+      - name: Compare native Go JSLT and mapping with Java
+        run: |
+          set -euo pipefail
+          mvn -B -q -DskipTests -f sources/src/pom.xml compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single
+          worker_jar=$(find sources/src/target -maxdepth 1 -name '*-jar-with-dependencies.jar' -print -quit)
+          test -n "$worker_jar"
+          mkdir -p /tmp/streams-jslt-compat
+          javac -cp "$worker_jar" -d /tmp/streams-jslt-compat sources/go/compat/StreamsCompat.java
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/mapping-audit"
+          cd sources/go
+          STREAMS_MAPPING_AUDIT_OUTPUT="$GITHUB_WORKSPACE/artifacts/mapping-audit/report.json" \
+            STREAMS_MAPPING_GOLDEN_OUTPUT="$GITHUB_WORKSPACE/artifacts/mapping-audit/golden.json" \
+            STREAMS_COMPAT_CLASSPATH="/tmp/streams-jslt-compat:$GITHUB_WORKSPACE/$worker_jar" \
+            STREAMS_JSLT_BUNDLE="$GITHUB_WORKSPACE/sources/go/jslt-bundle.js" \
+            go test -count=1 -run '^(TestNativeJSLTParity|TestJSLTSyntheticParseTimePrefix|TestJSLTReplaceRegexCacheParity|TestReferenceTransforms|TestJavaBridgeUnicodeProtocol|TestFixtureMappingFallbacks|TestMappingInputShapeParity|TestLegacyJSONRootParity|TestUnicodeLiteralMappingParity|TestLegacyJSONPathParity|TestLegacyURLSelectorParity|TestLegacyQuotedWildcardArrayParity|TestAdvancedWildcardObjectParity|TestAdvancedObjectWildcardOrderParity|TestJavaGoMappingAudit|TestMalformedJaywayRuleParity|TestLegacyTerminalFunctionParity|TestLegacyLiteralDELMapping|TestLegacyDELWholeDocumentAndOutputModes|TestLegacyLenientDELParity)$' -v .
+
+      - name: Upload synthetic Java/Go mapping parity results
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: mapping-parity-audit
+          path: artifacts/mapping-audit/*.json
+          retention-days: 14
+          if-no-files-found: warn
 
   image-build:
     needs: worker-tests
@@ -102,15 +147,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.0.0
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - run: mvn clean compile org.apache.maven.plugins:maven-assembly-plugin:3.8.0:single
-        working-directory: sources/src
-      - run: cp sources/src/target/KafkaPublisher-1.0-SNAPSHOT-jar-with-dependencies.jar docker/worker/KafkaHandler.jar
-      - run: docker build -t streams/worker:ci docker/worker
+      - name: Build Go-only worker and assert Java is absent
+        run: |
+          docker build -t streams/worker:ci -f docker/worker/Dockerfile .
+          docker run --rm --entrypoint /bin/sh streams/worker:ci -c 'test ! -e /usr/src/myapp/KafkaHandler.jar && test ! -d /usr/src/myapp/compat && ! command -v java'
+          docker image inspect --format 'Go-only worker image size in bytes = {{.Size}}' streams/worker:ci
+      - name: Verify native mapping, JSLT and timezone support in Alpine
+        run: docker build --target native-test -t streams/worker-native-test:ci -f docker/worker/Dockerfile .
       - name: Archive validated image
         run: |
           set -euo pipefail
@@ -122,6 +165,17 @@ jobs:
           path: worker.tar.gz
           retention-days: 7
           if-no-files-found: error
+      - name: Build isolated real Kafka test image
+        run: |
+          docker build --target real-kafka-test -t streams/worker-kafka-test:ci -f docker/worker/Dockerfile .
+          docker save streams/worker-kafka-test:ci | gzip > worker-kafka-test.tar.gz
+          gzip -t worker-kafka-test.tar.gz
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: ci-kafka-fault-test
+          path: worker-kafka-test.tar.gz
+          retention-days: 1
+          if-no-files-found: error
 
   helm:
     runs-on: ubuntu-24.04
@@ -129,6 +183,29 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
+      - name: Check development chart version SHA edge cases
+        run: |
+          set -euo pipefail
+          tmp_chart=$(mktemp)
+          trap 'rm -f "$tmp_chart"' EXIT
+          for case in '0679384:g0679384' '1234567:1234567' '0ab1234:0ab1234'; do
+            IFS=: read -r sha expected <<< "$case"
+            cp helm-chart/Chart.yaml "$tmp_chart"
+            SHORT_SHA="$sha" bash .github/scripts/materialize-chart-version.sh "$tmp_chart"
+            version=$(sed -n 's/^version: //p' "$tmp_chart")
+            app_version=$(sed -n 's/^appVersion: //p' "$tmp_chart")
+            [[ "$version" == *-"$expected" && "$app_version" == "$version" ]] || {
+              echo "Invalid development chart version for $sha: $version / $app_version" >&2
+              exit 1
+            }
+          done
+      - name: Validate PR #12 staging Helm bundle
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 12
+        env:
+          PR_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bash -n .github/scripts/package-pr-staging.sh
+          bash .github/scripts/package-pr-staging.sh "$PR_SOURCE_SHA" "$RUNNER_TEMP/pr12-staging-check"
       - name: Materialize development chart version
         run: bash .github/scripts/materialize-chart-version.sh
       - run: helm lint helm-chart
@@ -151,6 +228,8 @@ jobs:
               - 'sources/**'
               - 'helm-chart/**'
               - '.github/docker-compose/laravel-tests.yml'
+              - '.github/scripts/k8s/**'
+              - '.github/scripts/package-pr-staging.sh'
               - 'dev-environment/k8s_tests/**'
               - '.github/workflows/ci.yml'
 
@@ -249,6 +328,19 @@ jobs:
       - name: Import validated images into K3s
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/import-ci-images.sh
+      - name: Download real Kafka fault test image
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
+        with:
+          name: ci-kafka-fault-test
+          path: ci-fault-test
+      - name: Import real Kafka test image into K3s
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          gzip -dc ci-fault-test/worker-kafka-test.tar.gz | docker load
+          docker tag streams/worker-kafka-test:ci ghcr.io/manticoresoftware/streams/worker-kafka-test:ci
+          docker image save ghcr.io/manticoresoftware/streams/worker-kafka-test:ci | sudo k3s ctr -n k8s.io images import -
       - name: Install Kafka and chart
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/install-streams-chart.sh
@@ -258,6 +350,9 @@ jobs:
       - name: Create Kafka test topics
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/create-kafka-test-topics.sh
+      - name: Verify real Kafka fault injection and offset recovery
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/run-real-kafka-fault-tests.sh
       - name: Migrate and seed Laravel cluster test database
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: kubectl -n "$APP_NAMESPACE" exec "$UI_POD" -c "$UI_CONTAINER" -- php artisan migrate:fresh --seed --force
@@ -276,6 +371,12 @@ jobs:
       - name: Wait for Kafka consumer assignment
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/wait-for-kafka-consumer-assignment.sh
+      - name: Report Go worker startup and verify health endpoints
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-startup.sh
+      - name: Measure JVM-free worker memory at readiness
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-memory.sh readiness
       - name: Load Kafka test fixture
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/capture-kafka-start-offsets.sh
@@ -288,6 +389,9 @@ jobs:
       - name: Verify Kafka processing result
         if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
         run: bash .github/scripts/k8s/verify-kafka-processing.sh
+      - name: Measure JVM-free worker memory after Kafka
+        if: github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true'
+        run: bash .github/scripts/k8s/report-worker-memory.sh after-kafka
       - name: Collect diagnostics
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.relevant == 'true')
         run: bash .github/scripts/k8s/collect-diagnostics.sh artifacts/k8s
@@ -299,6 +403,81 @@ jobs:
             artifacts/
             artifacts-rendered-helm.yaml
           retention-days: 3
+
+  # Manual opt-in: Actions > CI > Run workflow > select wip/go-worker.
+  # CI already exists on master, so this works before PR #12 is merged.
+  # Regular pull_request and push events never publish staging tags.
+  publish-pr-staging:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/wip/go-worker'
+    needs: [k8s-e2e, helm, image-build, ui-image-build, worker-image-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.0
+      - name: Verify staging candidate is current same-repo PR #12 HEAD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/12")
+          jq -e --arg source "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .number == 12 and .state == "open" and .base.ref == "master" and
+            .head.ref == "wip/go-worker" and .head.repo.full_name == $repo and
+            .head.sha == $source
+          ' <<< "$pr" >/dev/null
+          echo "Publishing the verified, current PR #12 head $GITHUB_SHA"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v4.3.1
+      - name: Prepare the matching staging chart and values
+        run: |
+          set -euo pipefail
+          bash .github/scripts/package-pr-staging.sh "$GITHUB_SHA" "$RUNNER_TEMP/pr12-staging"
+      - name: Download six already-tested images from this CI run
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.3.0
+        with:
+          pattern: ci-image-*
+          path: ci-staging-images
+          merge-multiple: true
+      - name: Publish the verified PR images to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="pr-12-${GITHUB_SHA:0:12}"
+          echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for component in worker manticore scaler rules_checker ui ui-nginx; do
+            archive="ci-staging-images/${component}.tar.gz"
+            test -s "$archive"
+            gzip -t "$archive"
+            gzip -dc "$archive" | docker load
+            docker image inspect "streams/${component}:ci" >/dev/null
+            image="ghcr.io/manticoresoftware/streams/${component}:${tag}"
+            docker tag "streams/${component}:ci" "$image"
+            docker push "$image"
+          done
+          docker logout ghcr.io
+      - name: Upload Helm chart, pinned values and instructions
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4.6.2
+        with:
+          name: staging-pr-12-${{ github.sha }}
+          path: ${{ runner.temp }}/pr12-staging/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Summarize staging handoff
+        run: |
+          set -euo pipefail
+          tag="pr-12-${GITHUB_SHA:0:12}"
+          {
+            echo "### PR #12 staging images published"
+            echo
+            echo "Verified source commit: $GITHUB_SHA"
+            echo "GHCR image tag: $tag (all six Streams images)"
+            echo "Download the staging-pr-12-$GITHUB_SHA workflow artifact for the matching Helm chart, pinned values and README."
+            echo "Staging only; no production release was created."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
