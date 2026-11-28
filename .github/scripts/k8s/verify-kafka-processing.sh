@@ -5,6 +5,11 @@ end=$(( $(date +%s) + TIMEOUT_SECONDS ))
 expected_offset=$((START_OFFSET + EXPECTED_RECORDS))
 expected_input_offset=$((INPUT_START_OFFSET + FIXTURE_RECORDS))
 
+# Frozen Java reference: 43,403 fixture inputs, 9,418 outputs, OUTPUT_DOCS=0010.
+# Java and Go matched in https://github.com/manticoresoftware/streams/actions/runs/46117851271
+# Independently reproduced in the regular E2E run 46117912758.
+expected_sha256=fcc241b7c766e00a2e6a7b036a7c3ab7f12bc5a9859c6d3cb10b9c57457b9142
+
 kafka() {
   local tool=$1
   shift
@@ -45,6 +50,12 @@ while [ "$(date +%s)" -lt "$end" ]; do
         exit 1
       }
       printf 'Processed exactly %s records; canonical output SHA-256: %s\n' "$EXPECTED_RECORDS" "$actual_sha256"
+      if [ "$actual_sha256" != "$expected_sha256" ]; then
+        printf 'Kafka output differs from the Java golden reference:\n  expected: %s\n  actual:   %s\n' \
+          "$expected_sha256" "$actual_sha256" >&2
+        exit 1
+      fi
+      echo 'Kafka output matches the Java golden reference, including duplicate counts.'
       exit 0
     fi
   fi
