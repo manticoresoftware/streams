@@ -3,14 +3,50 @@ set -euo pipefail
 
 end=$(( $(date +%s) + TIMEOUT_SECONDS ))
 expected_offset=$((START_OFFSET + EXPECTED_RECORDS))
+expected_input_offset=$((INPUT_START_OFFSET + FIXTURE_RECORDS))
+
+kafka() {
+  local tool=$1
+  shift
+  kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- \
+    "/opt/bitnami/kafka/bin/$tool" --bootstrap-server localhost:9092 "$@"
+}
+
+output_offset() {
+  kafka kafka-get-offsets.sh --topic my-results | awk -F: '
+    $1 == "my-results" && $2 == 0 && $3 ~ /^[0-9]+$/ { offset = $3; found++ }
+    END { if (found != 1 || NR != 1) exit 1; print offset }
+  '
+}
+
 next_report=0
 pipeline_name=${PIPELINE#"${RELEASE_NAME}"-}
 while [ "$(date +%s)" -lt "$end" ]; do
-  current_offset=$(kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- /opt/bitnami/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic my-results | awk -F: 'END { print $3 }')
-  current_offset=${current_offset:-0}
+  current_offset=$(output_offset)
+  if [ "$current_offset" -gt "$expected_offset" ]; then
+    echo "Kafka output exceeded expected offset $expected_offset: $current_offset" >&2
+    exit 1
+  fi
   if [ "$current_offset" -eq "$expected_offset" ]; then
-    printf 'Processed exactly %s records\n' "$EXPECTED_RECORDS"
-    exit 0
+    # Do not accept a transient correct count while the worker still has
+    # unprocessed input and may produce additional records.
+    committed_offset=$(kafka kafka-consumer-groups.sh --describe --group ms_test_stream |
+      awk '$2 == "my-docs" && $3 == 0 { print $4 }')
+    if [ "$committed_offset" = "$expected_input_offset" ]; then
+      output_file=$(mktemp)
+      trap 'rm -f "$output_file"' EXIT
+      timeout 150s kubectl -n "$KAFKA_NAMESPACE" exec "$KAFKA_POD" -c kafka -- \
+        /opt/bitnami/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+        --topic my-results --partition 0 --offset "$START_OFFSET" \
+        --max-messages "$EXPECTED_RECORDS" --timeout-ms 90000 > "$output_file"
+      actual_sha256=$(python3 .github/scripts/k8s/kafka-output-sha256.py "$output_file" "$EXPECTED_RECORDS")
+      [ "$(output_offset)" -eq "$expected_offset" ] || {
+        echo "Kafka output changed while collecting the fixture" >&2
+        exit 1
+      }
+      printf 'Processed exactly %s records; canonical output SHA-256: %s\n' "$EXPECTED_RECORDS" "$actual_sha256"
+      exit 0
+    fi
   fi
   now=$(date +%s)
   if [ "$now" -ge "$next_report" ]; then
