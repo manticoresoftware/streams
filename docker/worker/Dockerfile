@@ -36,5 +36,23 @@ RUN ["/worker.test", "-test.v", "-test.run", "^(TestJSLTNamedTimeZones|TestJSLTP
 FROM native-runtime AS real-kafka-test
 COPY --from=go-test /worker.test /worker.test
 
+# Temporary baseline-only Java worker; never part of the PR image.
+FROM maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS java-reference-build
+WORKDIR /build
+COPY sources/src/pom.xml ./
+COPY sources/src/src/main src/main
+RUN mvn -B -q compile assembly:single \
+    && cp target/*-jar-with-dependencies.jar /KafkaHandler.jar
+
+FROM eclipse-temurin:21-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2 AS compat-test
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common \
+    && add-apt-repository -y ppa:ondrej/php \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends php8.5-cli php8.5-mbstring \
+    && php -r 'if (PHP_VERSION_ID < 80512 || PHP_VERSION_ID >= 80600) exit(1);' \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=java-reference-build /KafkaHandler.jar /KafkaHandler.jar
+
 # Default image for deployment and staging: identical to native-runtime.
 FROM native-runtime

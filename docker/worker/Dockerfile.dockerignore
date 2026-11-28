@@ -5,3 +5,9 @@
 !docker/
 !docker/worker/
 !docker/worker/check.sh
+
+!sources/src/
+!sources/src/pom.xml
+!sources/src/src/
+!sources/src/src/main/
+!sources/src/src/main/**
